@@ -139,3 +139,18 @@ body {
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
 }
+
+/* Responsive breakpoints for tablet and phone */
+@media (max-width: 1024px) {
+  /* Tablet mode adjustments */
+  .tablet-toolbar {
+    @apply bottom-auto top-16 left-2;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Phone mode - horizontal toolbar at bottom */
+  .phone-toolbar {
+    @apply bottom-16 left-1/2 top-auto flex-row -translate-x-1/2;
+  }
+}

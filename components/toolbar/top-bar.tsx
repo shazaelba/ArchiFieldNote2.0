@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Map, ChevronDown, Sun, Moon, Monitor, Settings, Table, BarChart3, Check } from "lucide-react"
+import { Map, ChevronDown, Sun, Moon, Monitor, Settings, Table, BarChart3, Check, FolderOpen } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +22,7 @@ interface TopBarProps {
   onOpenSettings: () => void
   onOpenDataTable: () => void
   onOpenDataCharts: () => void
+  onOpenSavedDatasets: () => void
   isSaving?: boolean
   lastSaved?: Date | null
 }
@@ -36,18 +37,21 @@ export function TopBar({
   onOpenSettings,
   onOpenDataTable,
   onOpenDataCharts,
+  onOpenSavedDatasets,
   isSaving,
   lastSaved,
 }: TopBarProps) {
   return (
-    <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between border-b border-border bg-background/95 px-4 py-3 backdrop-blur-sm">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-          <Map className="h-5 w-5 text-primary-foreground" />
+    <div className="absolute left-0 right-0 top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/95 px-2 backdrop-blur-sm sm:h-16 sm:px-4">
+      {/* Left section - logo and title */}
+      <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary sm:h-10 sm:w-10">
+          <Map className="h-4 w-4 text-primary-foreground sm:h-5 sm:w-5" />
         </div>
-        <span className="text-lg font-semibold text-foreground">ArchiFieldNote</span>
+        <span className="hidden text-base font-semibold text-foreground sm:inline sm:text-lg">ArchiFieldNote</span>
 
-        <div className="ml-4 flex items-center gap-1.5 text-xs text-muted-foreground">
+        {/* Save status - only on larger screens */}
+        <div className="ml-2 hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
           {isSaving ? (
             <>
               <div className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
@@ -62,35 +66,46 @@ export function TopBar({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* Right section - actions */}
+      <div className="flex items-center gap-1 sm:gap-2">
         <Button
           variant="outline"
           size="icon"
-          className="min-h-[44px] min-w-[44px] bg-transparent"
+          className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]"
+          onClick={onOpenSavedDatasets}
+          title="Saved Journeys"
+        >
+          <FolderOpen className="h-4 w-4 sm:h-5 sm:w-5" />
+        </Button>
+
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]"
           onClick={onOpenDataTable}
           title="Data Table"
         >
-          <Table className="h-5 w-5" />
+          <Table className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
 
         <Button
           variant="outline"
           size="icon"
-          className="min-h-[44px] min-w-[44px] bg-transparent"
+          className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]"
           onClick={onOpenDataCharts}
           title="Charts"
         >
-          <BarChart3 className="h-5 w-5" />
+          <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
 
-        <div className="mx-1 h-8 w-px bg-border" />
+        <div className="mx-0.5 hidden h-8 w-px bg-border sm:mx-1 sm:block" />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" className="min-h-[44px] min-w-[44px] bg-transparent">
-              {theme === "light" && <Sun className="h-5 w-5" />}
-              {theme === "dark" && <Moon className="h-5 w-5" />}
-              {theme === "system" && <Monitor className="h-5 w-5" />}
+            <Button variant="outline" size="icon" className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]">
+              {theme === "light" && <Sun className="h-4 w-4 sm:h-5 sm:w-5" />}
+              {theme === "dark" && <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
+              {theme === "system" && <Monitor className="h-4 w-4 sm:h-5 sm:w-5" />}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -114,17 +129,19 @@ export function TopBar({
         <Button
           variant="outline"
           size="icon"
-          className="min-h-[44px] min-w-[44px] bg-transparent"
+          className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]"
           onClick={onOpenSettings}
         >
-          <Settings className="h-5 w-5" />
+          <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="min-h-[44px] gap-2 bg-transparent">
-              {project?.name || "Select Project"}
-              <ChevronDown className="h-4 w-4" />
+            <Button variant="outline" className="h-10 gap-1 bg-transparent px-2 sm:min-h-[44px] sm:gap-2 sm:px-3">
+              <span className="max-w-[80px] truncate text-xs sm:max-w-[120px] sm:text-sm">
+                {project?.name || "Project"}
+              </span>
+              <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">

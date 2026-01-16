@@ -3,25 +3,35 @@
 import type React from "react"
 
 import { useRef, useEffect, useCallback } from "react"
-import type { Project, MapObject } from "@/lib/db"
+import type { MapObject } from "@/lib/db"
 
 interface ZoomPreviewProps {
-  project: Project | undefined
-  objects: MapObject[]
-  canvasSize: { width: number; height: number } | null
+  canvasSize: { width: number; height: number }
   viewportRect: { x: number; y: number; width: number; height: number } | null
-  onNavigate: (x: number, y: number) => void
-  isDark: boolean
+  baseMapImage: HTMLImageElement | null
+  baseMapPosition?: { x: number; y: number }
+  baseMapScale?: number
+  objects: MapObject[]
+  onPreviewClick: (x: number, y: number) => void
+  className?: string
 }
 
-export function ZoomPreview({ project, objects, canvasSize, viewportRect, onNavigate, isDark }: ZoomPreviewProps) {
+export function ZoomPreview({
+  canvasSize,
+  viewportRect,
+  baseMapImage,
+  baseMapPosition,
+  baseMapScale,
+  objects,
+  onPreviewClick,
+  className,
+}: ZoomPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
 
-  const PREVIEW_WIDTH = 160
-  const PREVIEW_HEIGHT = 100
+  const PREVIEW_WIDTH = 140
+  const PREVIEW_HEIGHT = 90
 
-  const effectiveCanvasSize = canvasSize ?? { width: 4000, height: 3000 }
+  const effectiveCanvasSize = canvasSize ?? { width: 8000, height: 6000 }
   const scale = Math.min(PREVIEW_WIDTH / effectiveCanvasSize.width, PREVIEW_HEIGHT / effectiveCanvasSize.height)
 
   const safeObjects = objects ?? []
@@ -31,16 +41,26 @@ export function ZoomPreview({ project, objects, canvasSize, viewportRect, onNavi
     const ctx = canvas?.getContext("2d")
     if (!canvas || !ctx) return
 
-    // Clear
     ctx.clearRect(0, 0, PREVIEW_WIDTH, PREVIEW_HEIGHT)
 
-    // Background
-    ctx.fillStyle = isDark ? "#1a1a2e" : "#e8e8f0"
+    ctx.fillStyle = "var(--muted)"
     ctx.fillRect(0, 0, PREVIEW_WIDTH, PREVIEW_HEIGHT)
 
     ctx.save()
     ctx.scale(scale, scale)
 
+    // Draw base map thumbnail
+    if (baseMapImage) {
+      ctx.drawImage(
+        baseMapImage,
+        baseMapPosition?.x || 0,
+        baseMapPosition?.y || 0,
+        baseMapImage.width * (baseMapScale || 1),
+        baseMapImage.height * (baseMapScale || 1),
+      )
+    }
+
+    // Draw objects
     safeObjects.forEach((obj) => {
       if (obj.type === "polygon" && obj.vertices.length > 2) {
         ctx.beginPath()
@@ -56,7 +76,7 @@ export function ZoomPreview({ project, objects, canvasSize, viewportRect, onNavi
         ctx.moveTo(obj.vertices[0].x, obj.vertices[0].y)
         ctx.lineTo(obj.vertices[1].x, obj.vertices[1].y)
         ctx.strokeStyle = obj.style.strokeColor
-        ctx.lineWidth = 2 / scale
+        ctx.lineWidth = 3 / scale
         ctx.stroke()
       }
     })
@@ -81,7 +101,7 @@ export function ZoomPreview({ project, objects, canvasSize, viewportRect, onNavi
         viewportRect.height * scale,
       )
     }
-  }, [safeObjects, scale, viewportRect, isDark]) // Updated dependency
+  }, [safeObjects, scale, viewportRect, baseMapImage, baseMapPosition, baseMapScale])
 
   useEffect(() => {
     draw()
@@ -94,17 +114,18 @@ export function ZoomPreview({ project, objects, canvasSize, viewportRect, onNavi
 
       const x = (e.clientX - rect.left) / scale
       const y = (e.clientY - rect.top) / scale
-      onNavigate(x, y)
+      onPreviewClick(x, y)
     },
-    [scale, onNavigate],
+    [scale, onPreviewClick],
   )
 
   return (
     <div
-      ref={containerRef}
-      className="absolute bottom-20 right-4 z-20 overflow-hidden rounded-lg border border-border bg-card shadow-lg"
+      className={`absolute bottom-16 right-2 z-20 overflow-hidden rounded-lg border border-border bg-card shadow-lg sm:bottom-20 sm:right-4 ${className || ""}`}
     >
-      <div className="px-2 py-1 text-xs font-medium text-muted-foreground border-b border-border">Overview</div>
+      <div className="border-b border-border px-2 py-1 text-[10px] font-medium text-muted-foreground sm:text-xs">
+        Overview
+      </div>
       <canvas
         ref={canvasRef}
         width={PREVIEW_WIDTH}

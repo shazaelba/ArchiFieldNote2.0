@@ -7,21 +7,26 @@ export interface ObjectStyle {
   strokeWidth: number
   strokeStyle: "solid" | "dashed" | "dotted"
   hatchPattern: "none" | "diagonal" | "dotted" | "crosshatch"
-  // New line endpoint options
   lineEndpoints: "none" | "points" | "arrows"
   endpointSize: number
-  // Per-object hatch settings
   hatchSpacing: number
   hatchLineWidth: number
-  // Point size per object
   pointSize: number
+  showPoints: boolean
+}
+
+export interface CustomField {
+  id: string
+  name: string
+  value: string
 }
 
 export interface ObjectMetadata {
   tags: string[]
   notes: string
-  photos: string[] // Base64 image strings
+  photos: string[]
   qualitativeType: string
+  customFields: CustomField[]
 }
 
 export interface MapObject {
@@ -46,6 +51,7 @@ export interface Project {
   gridStyle: "lines" | "dots" | "smallSquares"
   gridSize: number
   measurementUnit: "m" | "cm" | "mm" | "ft" | "in"
+  savedFieldNames: string[]
   createdAt: number
   updatedAt: number
 }
@@ -76,7 +82,7 @@ class ThresholdMapperDB extends Dexie {
 
   constructor() {
     super("ThresholdMapperDB")
-    this.version(2).stores({
+    this.version(3).stores({
       projects: "id, name, createdAt, gridStyle, gridSize",
       objects: "id, type, createdAt",
       sequences: "id, projectId, createdAt",
@@ -121,6 +127,7 @@ export async function createProject(name: string): Promise<Project> {
     gridStyle: "lines",
     gridSize: 50,
     measurementUnit: "m",
+    savedFieldNames: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   }
@@ -194,4 +201,13 @@ export async function createSavedDataset(
 
 export async function getSavedDatasets(projectId: string): Promise<SavedDataset[]> {
   return await getDb().savedDatasets.where("projectId").equals(projectId).toArray()
+}
+
+export async function addSavedFieldName(projectId: string, fieldName: string): Promise<void> {
+  const project = await getDb().projects.get(projectId)
+  if (project && !project.savedFieldNames.includes(fieldName)) {
+    await updateProject(projectId, {
+      savedFieldNames: [...(project.savedFieldNames || []), fieldName],
+    })
+  }
 }

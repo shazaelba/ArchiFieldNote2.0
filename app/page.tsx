@@ -16,6 +16,7 @@ import { ScaleBar } from "@/components/canvas/scale-bar"
 import { CalibrationDialog } from "@/components/dialogs/calibration-dialog"
 import { ExportDialog } from "@/components/dialogs/export-dialog"
 import { SettingsDialog } from "@/components/dialogs/settings-dialog"
+import { SavedDatasetsDialog } from "@/components/dialogs/saved-datasets-dialog"
 import { PropertiesDrawer } from "@/components/properties/properties-drawer"
 import { SequencePanel } from "@/components/sequence/sequence-panel"
 import { DataTableView } from "@/components/data/data-table-view"
@@ -32,6 +33,7 @@ import {
   deleteMapObject,
   updateProject,
   createSavedDataset,
+  addSavedFieldName,
   db,
   type ObjectStyle,
   type MapObject,
@@ -65,15 +67,13 @@ export default function ArchiFieldNote() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [dataTableOpen, setDataTableOpen] = useState(false)
   const [dataChartsOpen, setDataChartsOpen] = useState(false)
+  const [savedDatasetsOpen, setSavedDatasetsOpen] = useState(false)
 
-  // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
 
-  // Grid settings
   const [gridStyle, setGridStyle] = useState<GridStyle>(currentProject?.gridStyle || "lines")
   const [gridSize, setGridSize] = useState(currentProject?.gridSize || 50)
-
   const [measurementUnit, setMeasurementUnit] = useState<MeasurementUnit>(currentProject?.measurementUnit || "m")
 
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>({
@@ -84,7 +84,6 @@ export default function ArchiFieldNote() {
     freehandSmoothing: 3,
   })
 
-  // Calibration state
   const [calibrationDialog, setCalibrationDialog] = useState(false)
   const [pendingCalibration, setPendingCalibration] = useState<{
     start: { x: number; y: number }
@@ -95,7 +94,6 @@ export default function ArchiFieldNote() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<MapCanvasRef>(null)
 
-  // Sync settings with project
   useEffect(() => {
     if (currentProject) {
       setGridStyle(currentProject.gridStyle || "lines")
@@ -104,7 +102,6 @@ export default function ArchiFieldNote() {
     }
   }, [currentProject])
 
-  // Save grid settings to project
   const handleGridStyleChange = useCallback(
     async (style: GridStyle) => {
       setGridStyle(style)
@@ -144,7 +141,16 @@ export default function ArchiFieldNote() {
     [currentProjectId],
   )
 
-  // Prevent pull-to-refresh on iPad
+  const handleAddFieldName = useCallback(
+    async (fieldName: string) => {
+      if (currentProjectId) {
+        await addSavedFieldName(currentProjectId, fieldName)
+        refetch()
+      }
+    },
+    [currentProjectId, refetch],
+  )
+
   useEffect(() => {
     const handler = (e: TouchEvent) => {
       if (e.touches.length > 1) return
@@ -163,7 +169,6 @@ export default function ArchiFieldNote() {
     }
   }, [sequences])
 
-  // Push initial state to undo history
   useEffect(() => {
     if (objects.length > 0) {
       pushState(objects)
@@ -223,7 +228,6 @@ export default function ArchiFieldNote() {
     setPropertiesOpen(false)
   }, [])
 
-  // Undo handler
   const handleUndo = useCallback(async () => {
     const prevState = undo()
     if (prevState) {
@@ -238,7 +242,6 @@ export default function ArchiFieldNote() {
     }
   }, [undo, refetch])
 
-  // Redo handler
   const handleRedo = useCallback(async () => {
     const nextState = redo()
     if (nextState) {
@@ -253,7 +256,6 @@ export default function ArchiFieldNote() {
     }
   }, [redo, refetch])
 
-  // Handle image upload
   const handleImageUpload = useCallback(() => {
     fileInputRef.current?.click()
   }, [])
@@ -284,14 +286,14 @@ export default function ArchiFieldNote() {
     strokeWidth: type === "freehand" ? displaySettings.freehandStrokeWidth : 2,
     strokeStyle: "solid",
     hatchPattern: "none",
-    lineEndpoints: "points",
+    lineEndpoints: "none",
     endpointSize: 8,
     hatchSpacing: 10,
     hatchLineWidth: 1,
     pointSize: 5,
+    showPoints: type === "polygon",
   })
 
-  // Handle polygon completion
   const handlePolygonComplete = useCallback(
     async (vertices: { x: number; y: number }[]) => {
       setIsSaving(true)
@@ -301,7 +303,7 @@ export default function ArchiFieldNote() {
         name: `Polygon ${objects.filter((o) => o.type === "polygon").length + 1}`,
         vertices,
         style: getDefaultStyle("polygon"),
-        metadata: { tags: [], notes: "", photos: [], qualitativeType: "" },
+        metadata: { tags: [], notes: "", photos: [], qualitativeType: "", customFields: [] },
       })
       setToolMode("select")
       setSelectedObjectId(newObject.id)
@@ -313,7 +315,6 @@ export default function ArchiFieldNote() {
     [objects, pushState, displaySettings, refetch],
   )
 
-  // Handle threshold completion
   const handleThresholdComplete = useCallback(
     async (start: { x: number; y: number }, end: { x: number; y: number }) => {
       setIsSaving(true)
@@ -323,7 +324,7 @@ export default function ArchiFieldNote() {
         name: `Line ${objects.filter((o) => o.type === "threshold").length + 1}`,
         vertices: [start, end],
         style: getDefaultStyle("threshold"),
-        metadata: { tags: [], notes: "", photos: [], qualitativeType: "" },
+        metadata: { tags: [], notes: "", photos: [], qualitativeType: "", customFields: [] },
       })
       setToolMode("select")
       setSelectedObjectId(newObject.id)
@@ -335,7 +336,6 @@ export default function ArchiFieldNote() {
     [objects, pushState, refetch],
   )
 
-  // Handle freehand completion
   const handleFreehandComplete = useCallback(
     async (vertices: { x: number; y: number }[]) => {
       setIsSaving(true)
@@ -345,7 +345,7 @@ export default function ArchiFieldNote() {
         name: `Drawing ${objects.filter((o) => o.type === "freehand").length + 1}`,
         vertices,
         style: getDefaultStyle("freehand"),
-        metadata: { tags: [], notes: "", photos: [], qualitativeType: "" },
+        metadata: { tags: [], notes: "", photos: [], qualitativeType: "", customFields: [] },
       })
       setToolMode("select")
       setSelectedObjectId(newObject.id)
@@ -357,7 +357,6 @@ export default function ArchiFieldNote() {
     [objects, pushState, displaySettings, refetch],
   )
 
-  // Handle calibration
   const handleCalibrationComplete = useCallback(
     (start: { x: number; y: number }, end: { x: number; y: number }, pixelDistance: number) => {
       setPendingCalibration({ start, end, pixelDistance })
@@ -384,7 +383,6 @@ export default function ArchiFieldNote() {
     [pendingCalibration, setCalibration],
   )
 
-  // Handle sequence mode
   const handleSequenceAdd = useCallback(
     async (objectId: string) => {
       if (!activeSequence && currentProjectId) {
@@ -410,7 +408,6 @@ export default function ArchiFieldNote() {
     [currentProjectId],
   )
 
-  // Toggle sequence mode
   const toggleSequenceMode = useCallback((enabled: boolean) => {
     setSequenceMode(enabled)
     if (!enabled) {
@@ -418,13 +415,11 @@ export default function ArchiFieldNote() {
     }
   }, [])
 
-  // Create new project
   const handleNewProject = useCallback(async () => {
     const project = await createProject(`Project ${projects.length + 1}`)
     setCurrentProjectId(project.id)
   }, [projects.length, setCurrentProjectId])
 
-  // Export
   const handleExport = useCallback(() => {
     setExportOpen(true)
   }, [])
@@ -443,6 +438,7 @@ export default function ArchiFieldNote() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenDataTable={() => setDataTableOpen(true)}
         onOpenDataCharts={() => setDataChartsOpen(true)}
+        onOpenSavedDatasets={() => setSavedDatasetsOpen(true)}
         isSaving={isSaving}
         lastSaved={lastSaved}
       />
@@ -483,10 +479,9 @@ export default function ArchiFieldNote() {
 
       <ScaleBar pixelToMeterRatio={currentProject?.pixelToMeterRatio || null} zoomLevel={zoomLevel} />
 
-      {/* Sequence mode indicator and panel */}
       {sequenceMode && (
-        <div className="absolute right-4 top-20 z-20 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-          Recording Journey - Tap objects to add
+        <div className="absolute right-2 top-16 z-20 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground sm:right-4 sm:top-20 sm:px-4 sm:py-2 sm:text-sm">
+          Recording Journey - Tap objects
         </div>
       )}
 
@@ -528,6 +523,13 @@ export default function ArchiFieldNote() {
         onMeasurementUnitChange={handleMeasurementUnitChange}
       />
 
+      <SavedDatasetsDialog
+        open={savedDatasetsOpen}
+        onClose={() => setSavedDatasetsOpen(false)}
+        projectId={currentProjectId}
+        objects={objects}
+      />
+
       <DataTableView
         open={dataTableOpen}
         onClose={() => setDataTableOpen(false)}
@@ -550,9 +552,11 @@ export default function ArchiFieldNote() {
         object={selectedObject}
         pixelToMeterRatio={currentProject?.pixelToMeterRatio || null}
         measurementUnit={measurementUnit}
+        savedFieldNames={currentProject?.savedFieldNames || []}
         onUpdate={handleUpdateObject}
         onDelete={handleDeleteObject}
         onEditVertices={handleEditVertices}
+        onAddFieldName={handleAddFieldName}
       />
     </div>
   )

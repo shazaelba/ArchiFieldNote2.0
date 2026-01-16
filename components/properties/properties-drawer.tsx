@@ -12,8 +12,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
 import { Trash2, Plus, Camera, X, Edit3 } from "lucide-react"
-import type { MapObject, ObjectStyle, ObjectMetadata } from "@/lib/db"
+import type { MapObject, ObjectStyle, ObjectMetadata, CustomField } from "@/lib/db"
 import { getPolygonArea, getLineLength } from "@/lib/canvas-utils"
 import { formatMeasurement, type MeasurementUnit } from "@/lib/measurement-utils"
 
@@ -23,21 +24,14 @@ interface PropertiesDrawerProps {
   object: MapObject | null
   pixelToMeterRatio: number | null
   measurementUnit: MeasurementUnit
+  savedFieldNames: string[]
   onUpdate: (updates: Partial<MapObject>) => void
   onDelete: () => void
   onEditVertices: () => void
+  onAddFieldName: (name: string) => void
 }
 
-const PRESET_COLORS = [
-  "#3b82f6", // Blue
-  "#ef4444", // Red
-  "#22c55e", // Green
-  "#f59e0b", // Amber
-  "#8b5cf6", // Violet
-  "#ec4899", // Pink
-  "#06b6d4", // Cyan
-  "#84cc16", // Lime
-]
+const PRESET_COLORS = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"]
 
 const QUALITATIVE_TYPES = [
   "Entrance",
@@ -58,11 +52,15 @@ export function PropertiesDrawer({
   object,
   pixelToMeterRatio,
   measurementUnit,
+  savedFieldNames,
   onUpdate,
   onDelete,
   onEditVertices,
+  onAddFieldName,
 }: PropertiesDrawerProps) {
   const [newTag, setNewTag] = useState("")
+  const [newFieldName, setNewFieldName] = useState("")
+  const [newFieldValue, setNewFieldValue] = useState("")
   const photoInputRef = useRef<HTMLInputElement>(null)
 
   const updateStyle = useCallback(
@@ -94,6 +92,42 @@ export function PropertiesDrawer({
     (tag: string) => {
       if (object) {
         updateMetadata({ tags: object.metadata.tags.filter((t) => t !== tag) })
+      }
+    },
+    [object, updateMetadata],
+  )
+
+  const addCustomField = useCallback(() => {
+    if (newFieldName.trim() && object) {
+      const newField: CustomField = {
+        id: crypto.randomUUID(),
+        name: newFieldName.trim(),
+        value: newFieldValue.trim(),
+      }
+      const currentFields = object.metadata.customFields || []
+      updateMetadata({ customFields: [...currentFields, newField] })
+      onAddFieldName(newFieldName.trim())
+      setNewFieldName("")
+      setNewFieldValue("")
+    }
+  }, [newFieldName, newFieldValue, object, updateMetadata, onAddFieldName])
+
+  const updateCustomField = useCallback(
+    (fieldId: string, value: string) => {
+      if (object) {
+        const currentFields = object.metadata.customFields || []
+        const updatedFields = currentFields.map((f) => (f.id === fieldId ? { ...f, value } : f))
+        updateMetadata({ customFields: updatedFields })
+      }
+    },
+    [object, updateMetadata],
+  )
+
+  const removeCustomField = useCallback(
+    (fieldId: string) => {
+      if (object) {
+        const currentFields = object.metadata.customFields || []
+        updateMetadata({ customFields: currentFields.filter((f) => f.id !== fieldId) })
       }
     },
     [object, updateMetadata],
@@ -145,9 +179,9 @@ export function PropertiesDrawer({
 
   return (
     <Sheet open={open} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent side="right" className="w-[360px] overflow-y-auto bg-card sm:w-[400px]">
+      <SheetContent side="right" className="w-[320px] overflow-y-auto bg-card p-4 sm:w-[380px] sm:p-6">
         <SheetHeader>
-          <SheetTitle className="flex items-center justify-between">
+          <SheetTitle className="flex items-center justify-between text-base sm:text-lg">
             <span>
               {object.type === "polygon" ? "Polygon" : object.type === "threshold" ? "Line" : "Freehand"} Properties
             </span>
@@ -156,80 +190,95 @@ export function PropertiesDrawer({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="min-h-[44px] min-w-[44px]"
+                  className="h-10 w-10 sm:min-h-[44px] sm:min-w-[44px]"
                   onClick={onEditVertices}
                   title="Edit Vertices"
                 >
-                  <Edit3 className="h-5 w-5" />
+                  <Edit3 className="h-4 w-4 sm:h-5 sm:w-5" />
                 </Button>
               )}
               <Button
                 variant="ghost"
                 size="icon"
-                className="min-h-[44px] min-w-[44px] text-destructive hover:bg-destructive/10"
+                className="h-10 w-10 text-destructive hover:bg-destructive/10 sm:min-h-[44px] sm:min-w-[44px]"
                 onClick={onDelete}
               >
-                <Trash2 className="h-5 w-5" />
+                <Trash2 className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
             </div>
           </SheetTitle>
         </SheetHeader>
 
-        <Tabs defaultValue="style" className="mt-6">
+        <Tabs defaultValue="style" className="mt-4 sm:mt-6">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="style" className="min-h-[44px]">
+            <TabsTrigger value="style" className="min-h-[40px] text-xs sm:min-h-[44px] sm:text-sm">
               Style
             </TabsTrigger>
-            <TabsTrigger value="data" className="min-h-[44px]">
+            <TabsTrigger value="data" className="min-h-[40px] text-xs sm:min-h-[44px] sm:text-sm">
               Data
             </TabsTrigger>
-            <TabsTrigger value="photos" className="min-h-[44px]">
+            <TabsTrigger value="photos" className="min-h-[40px] text-xs sm:min-h-[44px] sm:text-sm">
               Photos
             </TabsTrigger>
           </TabsList>
 
           {/* Style Tab */}
-          <TabsContent value="style" className="space-y-6 pt-4">
-            {/* Name */}
+          <TabsContent value="style" className="space-y-4 pt-4 sm:space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
+              <Label htmlFor="name" className="text-xs sm:text-sm">
+                Name
+              </Label>
               <Input
                 id="name"
                 value={object.name}
                 onChange={(e) => onUpdate({ name: e.target.value })}
-                className="min-h-[44px]"
+                className="min-h-[40px] text-sm sm:min-h-[44px]"
               />
             </div>
 
-            {/* Measurement display */}
             {measurement && pixelToMeterRatio && (
-              <div className="rounded-lg bg-muted p-3">
-                <span className="text-sm text-muted-foreground">{object.type === "polygon" ? "Area" : "Length"}:</span>
-                <span className="ml-2 font-mono text-lg font-semibold text-foreground">{measurement}</span>
+              <div className="rounded-lg bg-muted p-2 sm:p-3">
+                <span className="text-xs text-muted-foreground sm:text-sm">
+                  {object.type === "polygon" ? "Area" : "Length"}:
+                </span>
+                <span className="ml-2 font-mono text-base font-semibold text-foreground sm:text-lg">{measurement}</span>
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label>Point Size: {object.style.pointSize || 5}px</Label>
-              <Slider
-                value={[object.style.pointSize || 5]}
-                onValueChange={([value]) => updateStyle({ pointSize: value })}
-                min={2}
-                max={15}
-                step={1}
-                className="py-2"
-              />
-            </div>
+            {/* Point settings for polygons */}
+            {object.type === "polygon" && (
+              <>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs sm:text-sm">Show Points</Label>
+                  <Switch
+                    checked={object.style.showPoints !== false}
+                    onCheckedChange={(checked) => updateStyle({ showPoints: checked })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs sm:text-sm">Point Size: {object.style.pointSize || 5}px</Label>
+                  <Slider
+                    value={[object.style.pointSize || 5]}
+                    onValueChange={([value]) => updateStyle({ pointSize: value })}
+                    min={2}
+                    max={15}
+                    step={1}
+                    className="py-2"
+                  />
+                </div>
+              </>
+            )}
 
             {/* Fill Color (Polygons only) */}
             {object.type === "polygon" && (
               <div className="space-y-2">
-                <Label>Fill Color</Label>
+                <Label className="text-xs sm:text-sm">Fill Color</Label>
                 <div className="flex flex-wrap gap-2">
                   {PRESET_COLORS.map((color) => (
                     <button
                       key={color}
-                      className={`h-8 w-8 rounded-full border-2 transition-transform ${
+                      className={`h-7 w-7 rounded-full border-2 transition-transform sm:h-8 sm:w-8 ${
                         object.style.fillColor === color ? "scale-110 border-foreground" : "border-transparent"
                       }`}
                       style={{ backgroundColor: color }}
@@ -240,7 +289,7 @@ export function PropertiesDrawer({
                     type="color"
                     value={object.style.fillColor}
                     onChange={(e) => updateStyle({ fillColor: e.target.value })}
-                    className="h-8 w-8 cursor-pointer rounded-full"
+                    className="h-7 w-7 cursor-pointer rounded-full sm:h-8 sm:w-8"
                   />
                 </div>
               </div>
@@ -249,7 +298,9 @@ export function PropertiesDrawer({
             {/* Fill Opacity (Polygons only) */}
             {object.type === "polygon" && (
               <div className="space-y-2">
-                <Label>Fill Opacity: {Math.round(object.style.fillOpacity * 100)}%</Label>
+                <Label className="text-xs sm:text-sm">
+                  Fill Opacity: {Math.round(object.style.fillOpacity * 100)}%
+                </Label>
                 <Slider
                   value={[object.style.fillOpacity * 100]}
                   onValueChange={([value]) => updateStyle({ fillOpacity: value / 100 })}
@@ -263,12 +314,12 @@ export function PropertiesDrawer({
 
             {/* Stroke Color */}
             <div className="space-y-2">
-              <Label>Stroke Color</Label>
+              <Label className="text-xs sm:text-sm">Stroke Color</Label>
               <div className="flex flex-wrap gap-2">
                 {PRESET_COLORS.map((color) => (
                   <button
                     key={color}
-                    className={`h-8 w-8 rounded-full border-2 transition-transform ${
+                    className={`h-7 w-7 rounded-full border-2 transition-transform sm:h-8 sm:w-8 ${
                       object.style.strokeColor === color ? "scale-110 border-foreground" : "border-transparent"
                     }`}
                     style={{ backgroundColor: color }}
@@ -279,14 +330,14 @@ export function PropertiesDrawer({
                   type="color"
                   value={object.style.strokeColor}
                   onChange={(e) => updateStyle({ strokeColor: e.target.value })}
-                  className="h-8 w-8 cursor-pointer rounded-full"
+                  className="h-7 w-7 cursor-pointer rounded-full sm:h-8 sm:w-8"
                 />
               </div>
             </div>
 
             {/* Stroke Width */}
             <div className="space-y-2">
-              <Label>Stroke Width: {object.style.strokeWidth}px</Label>
+              <Label className="text-xs sm:text-sm">Stroke Width: {object.style.strokeWidth}px</Label>
               <Slider
                 value={[object.style.strokeWidth]}
                 onValueChange={([value]) => updateStyle({ strokeWidth: value })}
@@ -299,12 +350,12 @@ export function PropertiesDrawer({
 
             {/* Stroke Style */}
             <div className="space-y-2">
-              <Label>Line Style</Label>
+              <Label className="text-xs sm:text-sm">Line Style</Label>
               <Select
                 value={object.style.strokeStyle}
                 onValueChange={(value: "solid" | "dashed" | "dotted") => updateStyle({ strokeStyle: value })}
               >
-                <SelectTrigger className="min-h-[44px]">
+                <SelectTrigger className="min-h-[40px] sm:min-h-[44px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -315,15 +366,16 @@ export function PropertiesDrawer({
               </Select>
             </div>
 
+            {/* Line endpoint options */}
             {object.type === "threshold" && (
               <>
                 <div className="space-y-2">
-                  <Label>Line Endpoints</Label>
+                  <Label className="text-xs sm:text-sm">Line Endpoints</Label>
                   <Select
-                    value={object.style.lineEndpoints || "points"}
+                    value={object.style.lineEndpoints || "none"}
                     onValueChange={(value: "none" | "points" | "arrows") => updateStyle({ lineEndpoints: value })}
                   >
-                    <SelectTrigger className="min-h-[44px]">
+                    <SelectTrigger className="min-h-[40px] sm:min-h-[44px]">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -336,7 +388,7 @@ export function PropertiesDrawer({
 
                 {object.style.lineEndpoints !== "none" && (
                   <div className="space-y-2">
-                    <Label>Endpoint Size: {object.style.endpointSize || 8}px</Label>
+                    <Label className="text-xs sm:text-sm">Endpoint Size: {object.style.endpointSize || 8}px</Label>
                     <Slider
                       value={[object.style.endpointSize || 8]}
                       onValueChange={([value]) => updateStyle({ endpointSize: value })}
@@ -354,14 +406,14 @@ export function PropertiesDrawer({
             {object.type === "polygon" && (
               <>
                 <div className="space-y-2">
-                  <Label>Hatch Pattern</Label>
+                  <Label className="text-xs sm:text-sm">Hatch Pattern</Label>
                   <Select
                     value={object.style.hatchPattern}
                     onValueChange={(value: "none" | "diagonal" | "dotted" | "crosshatch") =>
                       updateStyle({ hatchPattern: value })
                     }
                   >
-                    <SelectTrigger className="min-h-[44px]">
+                    <SelectTrigger className="min-h-[40px] sm:min-h-[44px]">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -376,7 +428,7 @@ export function PropertiesDrawer({
                 {object.style.hatchPattern !== "none" && (
                   <>
                     <div className="space-y-2">
-                      <Label>Hatch Spacing: {object.style.hatchSpacing || 10}px</Label>
+                      <Label className="text-xs sm:text-sm">Hatch Spacing: {object.style.hatchSpacing || 10}px</Label>
                       <Slider
                         value={[object.style.hatchSpacing || 10]}
                         onValueChange={([value]) => updateStyle({ hatchSpacing: value })}
@@ -387,7 +439,9 @@ export function PropertiesDrawer({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Hatch Line Width: {object.style.hatchLineWidth || 1}px</Label>
+                      <Label className="text-xs sm:text-sm">
+                        Hatch Line Width: {object.style.hatchLineWidth || 1}px
+                      </Label>
                       <Slider
                         value={[object.style.hatchLineWidth || 1]}
                         onValueChange={([value]) => updateStyle({ hatchLineWidth: value })}
@@ -404,15 +458,14 @@ export function PropertiesDrawer({
           </TabsContent>
 
           {/* Data Tab */}
-          <TabsContent value="data" className="space-y-6 pt-4">
-            {/* Qualitative Type */}
+          <TabsContent value="data" className="space-y-4 pt-4 sm:space-y-6">
             <div className="space-y-2">
-              <Label>Type Classification</Label>
+              <Label className="text-xs sm:text-sm">Type Classification</Label>
               <Select
                 value={object.metadata.qualitativeType || ""}
                 onValueChange={(value) => updateMetadata({ qualitativeType: value })}
               >
-                <SelectTrigger className="min-h-[44px]">
+                <SelectTrigger className="min-h-[40px] sm:min-h-[44px]">
                   <SelectValue placeholder="Select type..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -425,24 +478,92 @@ export function PropertiesDrawer({
               </Select>
             </div>
 
+            {/* Custom Fields */}
+            <div className="space-y-2">
+              <Label className="text-xs sm:text-sm">Custom Fields</Label>
+              {(object.metadata.customFields || []).map((field) => (
+                <div key={field.id} className="flex gap-2">
+                  <div className="flex-1 space-y-1">
+                    <span className="text-xs text-muted-foreground">{field.name}</span>
+                    <Input
+                      value={field.value}
+                      onChange={(e) => updateCustomField(field.id, e.target.value)}
+                      className="min-h-[36px] text-sm"
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="mt-5 h-8 w-8"
+                    onClick={() => removeCustomField(field.id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+
+              <div className="flex gap-2 pt-2">
+                <Select value={newFieldName} onValueChange={setNewFieldName}>
+                  <SelectTrigger className="min-h-[40px] flex-1">
+                    <SelectValue placeholder="Field name..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {savedFieldNames.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="__new__">+ New field...</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {newFieldName === "__new__" && (
+                <Input
+                  placeholder="Enter field name..."
+                  value={newFieldName === "__new__" ? "" : newFieldName}
+                  onChange={(e) => setNewFieldName(e.target.value)}
+                  className="min-h-[40px]"
+                />
+              )}
+
+              {newFieldName && newFieldName !== "__new__" && (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Value..."
+                    value={newFieldValue}
+                    onChange={(e) => setNewFieldValue(e.target.value)}
+                    className="min-h-[40px] flex-1"
+                  />
+                  <Button onClick={addCustomField} size="icon" className="min-h-[40px] min-w-[40px]">
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {/* Tags */}
             <div className="space-y-2">
-              <Label>Tags</Label>
+              <Label className="text-xs sm:text-sm">Tags</Label>
               <div className="flex gap-2">
                 <Input
                   value={newTag}
                   onChange={(e) => setNewTag(e.target.value)}
                   placeholder="Add tag..."
-                  className="min-h-[44px]"
+                  className="min-h-[40px] sm:min-h-[44px]"
                   onKeyDown={(e) => e.key === "Enter" && addTag()}
                 />
-                <Button onClick={addTag} size="icon" className="min-h-[44px] min-w-[44px]">
+                <Button
+                  onClick={addTag}
+                  size="icon"
+                  className="min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px]"
+                >
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
               <div className="flex flex-wrap gap-2 pt-2">
                 {object.metadata.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="gap-1 py-1">
+                  <Badge key={tag} variant="secondary" className="gap-1 py-1 text-xs">
                     {tag}
                     <button onClick={() => removeTag(tag)} className="ml-1 hover:text-destructive">
                       <X className="h-3 w-3" />
@@ -454,13 +575,15 @@ export function PropertiesDrawer({
 
             {/* Notes */}
             <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
+              <Label htmlFor="notes" className="text-xs sm:text-sm">
+                Notes
+              </Label>
               <Textarea
                 id="notes"
                 value={object.metadata.notes}
                 onChange={(e) => updateMetadata({ notes: e.target.value })}
                 placeholder="Add observations..."
-                className="min-h-[120px] resize-none"
+                className="min-h-[100px] resize-none text-sm sm:min-h-[120px]"
               />
             </div>
           </TabsContent>
@@ -469,7 +592,10 @@ export function PropertiesDrawer({
           <TabsContent value="photos" className="space-y-4 pt-4">
             <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
 
-            <Button onClick={() => photoInputRef.current?.click()} className="min-h-[44px] w-full gap-2">
+            <Button
+              onClick={() => photoInputRef.current?.click()}
+              className="min-h-[40px] w-full gap-2 sm:min-h-[44px]"
+            >
               <Camera className="h-4 w-4" />
               Add Photo
             </Button>
@@ -493,7 +619,7 @@ export function PropertiesDrawer({
             </div>
 
             {object.metadata.photos.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">No photos added yet</p>
+              <p className="py-8 text-center text-xs text-muted-foreground sm:text-sm">No photos added yet</p>
             )}
           </TabsContent>
         </Tabs>

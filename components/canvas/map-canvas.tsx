@@ -50,8 +50,10 @@ export interface MapCanvasRef {
   cancelDrawing: () => void
 }
 
-const DEFAULT_CANVAS_WIDTH = 8000
-const DEFAULT_CANVAS_HEIGHT = 6000
+const DEFAULT_CANVAS_WIDTH = 12000
+const DEFAULT_CANVAS_HEIGHT = 9000
+
+const SNAP_THRESHOLD = 15
 
 export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCanvas(
   {
@@ -100,8 +102,8 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       img.crossOrigin = "anonymous"
       img.onload = () => {
         setBaseMapImage(img)
-        const width = Math.max(DEFAULT_CANVAS_WIDTH, img.width + 2000)
-        const height = Math.max(DEFAULT_CANVAS_HEIGHT, img.height + 2000)
+        const width = Math.max(DEFAULT_CANVAS_WIDTH, img.width + 4000)
+        const height = Math.max(DEFAULT_CANVAS_HEIGHT, img.height + 4000)
         setCanvasSize({ width, height })
       }
       img.src = project.baseMapImage
@@ -169,7 +171,6 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
           ctx.lineTo(width, y)
           ctx.stroke()
         }
-        // Major grid lines
         ctx.lineWidth = 1.5
         ctx.strokeStyle = isDark ? "#3d3d54" : "#b0b0c0"
         for (let x = 0; x < width; x += gridSize) {
@@ -222,16 +223,13 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
     const ctx = canvas?.getContext("2d")
     if (!canvas || !ctx) return
 
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
     ctx.fillStyle = isDark ? "#1a1a2e" : "#e8e8f0"
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-    // Draw grid
     drawGrid(ctx, canvas.width, canvas.height)
 
-    // Draw base map
     if (baseMapImage) {
       ctx.drawImage(
         baseMapImage,
@@ -248,13 +246,12 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       const isEditing = isSelected && toolMode === "editVertices"
       ctx.save()
 
-      // Get per-object settings with fallbacks
       const pointSize = obj.style.pointSize || displaySettings.pointSize
       const hatchSpacing = obj.style.hatchSpacing || displaySettings.hatchSpacing
       const hatchLineWidth = obj.style.hatchLineWidth || displaySettings.hatchLineWidth
+      const showPoints = obj.style.showPoints !== false
 
       if (obj.type === "polygon" && obj.vertices.length > 2) {
-        // Draw fill
         ctx.beginPath()
         ctx.moveTo(obj.vertices[0].x, obj.vertices[0].y)
         for (let i = 1; i < obj.vertices.length; i++) {
@@ -269,7 +266,6 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
             .padStart(2, "0")
         ctx.fill()
 
-        // Draw hatch pattern with per-object settings
         if (obj.style.hatchPattern !== "none") {
           drawHatchPattern(
             ctx,
@@ -281,27 +277,26 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
           )
         }
 
-        // Draw stroke
         ctx.strokeStyle = isSelected ? "#3C00BB" : obj.style.strokeColor
         ctx.lineWidth = isSelected ? obj.style.strokeWidth + 2 : obj.style.strokeWidth
         ctx.stroke()
 
-        // Draw vertices
-        obj.vertices.forEach((v, idx) => {
-          ctx.beginPath()
-          const radius = isEditing ? pointSize + 4 : isSelected ? pointSize + 2 : pointSize
-          ctx.arc(v.x, v.y, radius, 0, Math.PI * 2)
-          ctx.fillStyle =
-            isEditing && editingVertexIndex === idx ? "#ff6b00" : isSelected ? "#3C00BB" : obj.style.strokeColor
-          ctx.fill()
+        if (showPoints || isEditing || isSelected) {
+          obj.vertices.forEach((v, idx) => {
+            ctx.beginPath()
+            const radius = isEditing ? pointSize + 4 : isSelected ? pointSize + 2 : pointSize
+            ctx.arc(v.x, v.y, radius, 0, Math.PI * 2)
+            ctx.fillStyle =
+              isEditing && editingVertexIndex === idx ? "#ff6b00" : isSelected ? "#3C00BB" : obj.style.strokeColor
+            ctx.fill()
 
-          // Draw white border for editing vertices
-          if (isEditing) {
-            ctx.strokeStyle = "#ffffff"
-            ctx.lineWidth = 2
-            ctx.stroke()
-          }
-        })
+            if (isEditing) {
+              ctx.strokeStyle = "#ffffff"
+              ctx.lineWidth = 2
+              ctx.stroke()
+            }
+          })
+        }
       } else if (obj.type === "threshold" && obj.vertices.length === 2) {
         ctx.beginPath()
         ctx.moveTo(obj.vertices[0].x, obj.vertices[0].y)
@@ -319,45 +314,46 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
         ctx.stroke()
         ctx.setLineDash([])
 
-        const endpointStyle = obj.style.lineEndpoints || "points"
+        const endpointStyle = obj.style.lineEndpoints || "none"
         const endpointSize = obj.style.endpointSize || 8
         const color = isSelected ? "#3C00BB" : obj.style.strokeColor
 
-        if (endpointStyle === "points") {
+        if (isEditing) {
+          // Always show draggable points when editing
           obj.vertices.forEach((v, idx) => {
             ctx.beginPath()
-            const radius = isEditing ? endpointSize + 4 : isSelected ? endpointSize + 2 : endpointSize
+            const radius = endpointSize + 4
             ctx.arc(v.x, v.y, radius, 0, Math.PI * 2)
-            ctx.fillStyle = isEditing && editingVertexIndex === idx ? "#ff6b00" : color
+            ctx.fillStyle = editingVertexIndex === idx ? "#ff6b00" : color
             ctx.fill()
-
-            if (isEditing) {
-              ctx.strokeStyle = "#ffffff"
-              ctx.lineWidth = 2
-              ctx.stroke()
-            }
+            ctx.strokeStyle = "#ffffff"
+            ctx.lineWidth = 2
+            ctx.stroke()
+          })
+        } else if (endpointStyle === "points") {
+          obj.vertices.forEach((v) => {
+            ctx.beginPath()
+            ctx.arc(v.x, v.y, endpointSize, 0, Math.PI * 2)
+            ctx.fillStyle = color
+            ctx.fill()
           })
         } else if (endpointStyle === "arrows") {
-          // Draw arrow at end point
           drawArrowhead(ctx, obj.vertices[0], obj.vertices[1], endpointSize, color)
-          // Draw small circle at start
           ctx.beginPath()
           ctx.arc(obj.vertices[0].x, obj.vertices[0].y, endpointSize / 2, 0, Math.PI * 2)
           ctx.fillStyle = color
           ctx.fill()
         }
-        // "none" - no endpoints drawn
+        // "none" - no endpoints drawn unless editing
       } else if (obj.type === "freehand" && obj.vertices.length > 1) {
         ctx.beginPath()
         ctx.moveTo(obj.vertices[0].x, obj.vertices[0].y)
 
-        // Use quadratic curves for smoothing
         for (let i = 1; i < obj.vertices.length - 1; i++) {
           const xc = (obj.vertices[i].x + obj.vertices[i + 1].x) / 2
           const yc = (obj.vertices[i].y + obj.vertices[i + 1].y) / 2
           ctx.quadraticCurveTo(obj.vertices[i].x, obj.vertices[i].y, xc, yc)
         }
-        // Last point
         if (obj.vertices.length > 1) {
           ctx.lineTo(obj.vertices[obj.vertices.length - 1].x, obj.vertices[obj.vertices.length - 1].y)
         }
@@ -391,8 +387,6 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       ctx.lineTo(project.calibrationPoints.end.x, project.calibrationPoints.end.y)
       ctx.stroke()
       ctx.setLineDash([])
-
-      // Draw endpoints
       ;[project.calibrationPoints.start, project.calibrationPoints.end].forEach((p) => {
         ctx.beginPath()
         ctx.arc(p.x, p.y, 6, 0, Math.PI * 2)
@@ -471,7 +465,6 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
     draw()
   }, [draw])
 
-  // Get canvas coordinates from pointer event
   const getCanvasCoords = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
     if (!canvas) return { x: 0, y: 0 }
@@ -496,7 +489,21 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
     return null
   }, [])
 
-  // Handle pointer events
+  const snapToNearbyVertex = useCallback(
+    (coords: { x: number; y: number }, excludeObjectId?: string): { x: number; y: number } => {
+      for (const obj of objects) {
+        if (obj.id === excludeObjectId) continue
+        for (const vertex of obj.vertices) {
+          if (getDistance(coords, vertex) < SNAP_THRESHOLD) {
+            return { x: vertex.x, y: vertex.y }
+          }
+        }
+      }
+      return coords
+    },
+    [objects],
+  )
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       if (toolMode === "pan") return
@@ -516,7 +523,6 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       }
 
       if (toolMode === "select" || sequenceMode) {
-        // Find clicked object
         for (const obj of objects) {
           if (obj.type === "polygon" && isPointInPolygon(coords, obj.vertices)) {
             if (sequenceMode) {
@@ -595,7 +601,8 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
         const selectedObj = objects.find((o) => o.id === selectedObjectId)
         if (selectedObj) {
           const newVertices = [...selectedObj.vertices]
-          newVertices[editingVertexIndex] = coords
+          const snappedCoords = snapToNearbyVertex(coords, selectedObjectId)
+          newVertices[editingVertexIndex] = snappedCoords
           onVertexUpdate(selectedObjectId, newVertices)
         }
         return
@@ -603,7 +610,6 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
 
       if (!isDrawing || toolMode !== "freehand") return
 
-      // Apply smoothing by only adding points that are far enough apart
       const lastPoint = drawingVertices[drawingVertices.length - 1]
       const minDistance = displaySettings.freehandSmoothing || 3
 
@@ -614,14 +620,15 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
     [
       isDrawing,
       toolMode,
-      getCanvasCoords,
       drawingVertices,
       displaySettings.freehandSmoothing,
+      getCanvasCoords,
       isDraggingVertex,
       editingVertexIndex,
       selectedObjectId,
       objects,
       onVertexUpdate,
+      snapToNearbyVertex,
     ],
   )
 
@@ -632,12 +639,12 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       return
     }
 
-    if (isDrawing && toolMode === "freehand" && drawingVertices.length > 2) {
+    if (toolMode === "freehand" && isDrawing && drawingVertices.length > 5) {
       onFreehandComplete(drawingVertices)
       setDrawingVertices([])
       setIsDrawing(false)
     }
-  }, [isDrawing, toolMode, drawingVertices, onFreehandComplete, isDraggingVertex])
+  }, [toolMode, isDrawing, drawingVertices, onFreehandComplete, isDraggingVertex])
 
   const finishPolygon = useCallback(() => {
     if (drawingVertices.length >= 3) {
@@ -652,56 +659,12 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
     setIsDrawing(false)
   }, [])
 
-  // Expose methods via ref
-  useImperativeHandle(
-    ref,
-    () => ({
-      finishPolygon,
-      cancelDrawing,
-    }),
-    [finishPolygon, cancelDrawing],
-  )
+  useImperativeHandle(ref, () => ({
+    finishPolygon,
+    cancelDrawing,
+  }))
 
-  // Zoom control handlers
-  const handleZoomIn = useCallback(() => {
-    transformRef.current?.zoomIn(0.3)
-  }, [])
-
-  const handleZoomOut = useCallback(() => {
-    transformRef.current?.zoomOut(0.3)
-  }, [])
-
-  const handleZoomReset = useCallback(() => {
-    transformRef.current?.resetTransform()
-  }, [])
-
-  const handleZoomFit = useCallback(() => {
-    if (!containerRef.current) return
-    const container = containerRef.current.getBoundingClientRect()
-    const scaleX = container.width / canvasSize.width
-    const scaleY = container.height / canvasSize.height
-    const scale = Math.min(scaleX, scaleY) * 0.9
-    transformRef.current?.setTransform(
-      (container.width - canvasSize.width * scale) / 2,
-      (container.height - canvasSize.height * scale) / 2,
-      scale,
-    )
-  }, [canvasSize])
-
-  // Navigate from preview click
-  const handlePreviewNavigate = useCallback((x: number, y: number) => {
-    if (!containerRef.current || !transformRef.current) return
-    const container = containerRef.current.getBoundingClientRect()
-    const state = transformRef.current.instance.transformState
-
-    const newX = -(x * state.scale) + container.width / 2
-    const newY = -(y * state.scale) + container.height / 2
-
-    transformRef.current.setTransform(newX, newY, state.scale)
-  }, [])
-
-  // Handle zoom change
-  const handleTransform = useCallback(
+  const handleTransformChange = useCallback(
     (ref: ReactZoomPanPinchRef) => {
       const newZoom = ref.state.scale
       setZoomLevel(newZoom)
@@ -711,24 +674,57 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
     [onZoomChange, updateViewportRect],
   )
 
+  const handlePreviewClick = useCallback((x: number, y: number) => {
+    if (transformRef.current) {
+      const container = containerRef.current
+      if (!container) return
+
+      const rect = container.getBoundingClientRect()
+      const zoom = transformRef.current.instance.transformState.scale
+
+      const newX = -(x * zoom) + rect.width / 2
+      const newY = -(y * zoom) + rect.height / 2
+
+      transformRef.current.setTransform(newX, newY, zoom, 300)
+    }
+  }, [])
+
+  const handleZoomIn = useCallback(() => {
+    transformRef.current?.zoomIn(0.5, 200)
+  }, [])
+
+  const handleZoomOut = useCallback(() => {
+    transformRef.current?.zoomOut(0.5, 200)
+  }, [])
+
+  const handleReset = useCallback(() => {
+    transformRef.current?.resetTransform(200)
+  }, [])
+
+  const handleFit = useCallback(() => {
+    if (containerRef.current && baseMapImage) {
+      const container = containerRef.current.getBoundingClientRect()
+      const scaleX = container.width / (baseMapImage.width * (project?.baseMapScale || 1))
+      const scaleY = container.height / (baseMapImage.height * (project?.baseMapScale || 1))
+      const scale = Math.min(scaleX, scaleY, 1) * 0.9
+      transformRef.current?.setTransform(0, 0, scale, 200)
+    }
+  }, [baseMapImage, project?.baseMapScale])
+
   return (
-    <div
-      ref={containerRef}
-      className="relative h-full w-full overflow-hidden"
-      style={{ touchAction: toolMode === "pan" ? "auto" : "none" }}
-    >
+    <div ref={containerRef} className="absolute inset-0 top-14 overflow-hidden sm:top-16">
       <TransformWrapper
         ref={transformRef}
-        disabled={toolMode !== "pan" && toolMode !== "select" && toolMode !== "editVertices"}
-        minScale={0.02}
-        maxScale={10}
+        initialScale={0.5}
+        minScale={0.1}
+        maxScale={5}
         limitToBounds={false}
-        panning={{ disabled: toolMode !== "pan" && !(toolMode === "editVertices" && !isDraggingVertex) }}
-        onTransformed={handleTransform}
+        panning={{ disabled: toolMode !== "pan" && toolMode !== "select" }}
+        onTransformed={handleTransformChange}
         onPanning={updateViewportRect}
-        onZoom={updateViewportRect}
-        wheel={{ step: 0.1 }}
+        onPinching={updateViewportRect}
         pinch={{ step: 5 }}
+        wheel={{ step: 0.1, smoothStep: 0.005 }}
         doubleClick={{ disabled: true }}
       >
         <TransformComponent
@@ -739,24 +735,35 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
             ref={canvasRef}
             width={canvasSize.width}
             height={canvasSize.height}
+            className="touch-none"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
-            className="touch-none"
           />
         </TransformComponent>
       </TransformWrapper>
 
-      {/* Zoom preview */}
+      {/* Finish polygon button */}
+      {toolMode === "polygon" && drawingVertices.length >= 3 && (
+        <button
+          onClick={finishPolygon}
+          className="absolute right-4 top-4 z-20 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg transition-colors hover:bg-primary/90 sm:right-6 sm:top-6"
+        >
+          Finish Polygon ({drawingVertices.length} points)
+        </button>
+      )}
+
+      {/* Zoom preview - hidden on small screens */}
       <ZoomPreview
-        canvasWidth={canvasSize.width}
-        canvasHeight={canvasSize.height}
+        canvasSize={canvasSize}
         viewportRect={viewportRect}
         baseMapImage={baseMapImage}
         baseMapPosition={project?.baseMapPosition}
         baseMapScale={project?.baseMapScale}
-        onNavigate={handlePreviewNavigate}
+        objects={objects}
+        onPreviewClick={handlePreviewClick}
+        className="hidden sm:block"
       />
 
       {/* Bottom controls */}
@@ -764,32 +771,13 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
         zoomLevel={zoomLevel}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
-        onReset={handleZoomReset}
-        onFit={handleZoomFit}
+        onReset={handleReset}
+        onFit={handleFit}
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={onUndo}
         onRedo={onRedo}
       />
-
-      {/* Finish button for polygon */}
-      {toolMode === "polygon" && drawingVertices.length >= 3 && (
-        <div className="absolute bottom-24 left-1/2 z-30 -translate-x-1/2">
-          <button
-            onClick={finishPolygon}
-            className="rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-lg"
-          >
-            Finish Polygon ({drawingVertices.length} points)
-          </button>
-        </div>
-      )}
-
-      {/* Vertex editing indicator */}
-      {toolMode === "editVertices" && (
-        <div className="absolute left-1/2 top-20 z-30 -translate-x-1/2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white shadow-lg">
-          Editing Vertices - Drag points to move
-        </div>
-      )}
     </div>
   )
 })
