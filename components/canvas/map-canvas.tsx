@@ -596,11 +596,27 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
         }
         ctx.stroke()
 
-        drawingVertices.forEach((v) => {
+        if (toolMode === "polygon" && drawingVertices.length >= 3) {
+          const isNearFirst = getDistance(drawingVertices[0], drawingVertices[drawingVertices.length - 1]) < SNAP_THRESHOLD
+          if (isNearFirst) {
+            ctx.fillStyle = "#3C00BB44"
+            ctx.fill()
+          }
+        }
+
+        drawingVertices.forEach((v, idx) => {
           ctx.beginPath()
-          ctx.arc(v.x, v.y, displaySettings.pointSize, 0, Math.PI * 2)
-          ctx.fillStyle = "#3C00BB"
+          const isFirst = idx === 0
+          const isTarget = isFirst && drawingVertices.length >= 3 && getDistance(v, drawingVertices[drawingVertices.length - 1]) < SNAP_THRESHOLD
+
+          ctx.arc(v.x, v.y, isTarget ? 10 : displaySettings.pointSize, 0, Math.PI * 2)
+          ctx.fillStyle = isTarget ? "#ff6b00" : "#3C00BB"
           ctx.fill()
+          if (isTarget) {
+            ctx.strokeStyle = "#ffffff"
+            ctx.lineWidth = 2
+            ctx.stroke()
+          }
         })
       } else if (toolMode === "freehand" && drawingVertices.length > 1) {
         ctx.beginPath()
@@ -730,7 +746,7 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
 
       const coords = getCanvasCoords(e)
 
-      if (toolMode === "editVertices" && selectedObjectId) {
+      if ((toolMode === "editVertices" || toolMode === "select") && selectedObjectId) {
         const selectedObj = objects.find((o) => o.id === selectedObjectId)
         if (selectedObj) {
           const vertexIdx = findVertexNear(coords, selectedObj)
@@ -790,6 +806,13 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
         onSelectObject(null)
         onSelectObject(null)
       } else if (toolMode === "polygon") {
+        if (drawingVertices.length >= 3) {
+          const firstVertex = drawingVertices[0]
+          if (getDistance(coords, firstVertex) < SNAP_THRESHOLD) {
+            finishPolygon()
+            return
+          }
+        }
         setDrawingVertices((prev) => [...prev, coords])
         setIsDrawing(true)
       } else if (toolMode === "freehand" || toolMode === "highlighter") {
@@ -994,6 +1017,7 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
   const handleFit = useCallback(() => {
     if (containerRef.current && project?.images && project.images.length > 0) {
       const container = containerRef.current.getBoundingClientRect()
+      if (container.width === 0 || container.height === 0) return
 
       // Calculate bounding box of all visible images
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -1020,20 +1044,10 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       const scaleY = container.height / contentHeight
       const scale = Math.min(scaleX, scaleY, 1) * 0.9
 
-      // Center the content
-      const midX = (minX + maxX) / 2
-      const midY = (minY + maxY) / 2
+      const targetX = -minX * scale + (container.width - contentWidth * scale) / 2
+      const targetY = -minY * scale + (container.height - contentHeight * scale) / 2
 
-      // Calculate position to center the content
-      // transform center is viewport center.
-      // We want midX, midY to be at center.
-      // x = -midX * scale + viewportWidth/2
-      // y = -midY * scale + viewportHeight/2
-
-      const targetX = -midX * scale + container.width / 2
-      const targetY = -midY * scale + container.height / 2
-
-      transformRef.current?.setTransform(targetX, targetY, scale, 200)
+      transformRef.current?.setTransform(targetX, targetY, scale, 400)
     }
   }, [project?.images, loadedImages])
 

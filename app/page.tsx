@@ -36,6 +36,7 @@ import {
   deleteMapObject,
   createSavedDataset,
   addSavedFieldName,
+  getDb,
   db,
   type ObjectStyle,
   type MapObject,
@@ -190,16 +191,30 @@ export default function ArchiFieldNote() {
     }
   }, [])
 
+  // Debounced update for properties to avoid lag
+  const updateTimerRef = useRef<NodeJS.Timeout | null>(null)
+
   const handleUpdateObject = useCallback(
     async (updates: Partial<MapObject>) => {
-      if (selectedObjectId) {
+      if (!selectedObjectId) return
+
+      // Immediate local update for UI responsiveness
+      // (This is partially handled by Dexie's auto-sync if refetch is called, but here we want to debounce the DB hit)
+
+      if (updateTimerRef.current) {
+        clearTimeout(updateTimerRef.current)
+      } else {
+        pushState(objects)
+      }
+
+      updateTimerRef.current = setTimeout(async () => {
         setIsSaving(true)
         await updateMapObject(selectedObjectId, updates)
-        pushState(objects)
         setIsSaving(false)
         setLastSaved(new Date())
         refetch()
-      }
+        updateTimerRef.current = null // Clear ref so next change pushes state
+      }, 500)
     },
     [selectedObjectId, objects, pushState, refetch],
   )
@@ -263,13 +278,14 @@ export default function ArchiFieldNote() {
   const handleUndo = useCallback(async () => {
     const prevState = undo()
     if (prevState) {
-      const currentObjects = await db.objects.toArray()
-      for (const obj of currentObjects) {
-        await db.objects.delete(obj.id)
-      }
-      for (const obj of prevState) {
-        await db.objects.add(obj)
-      }
+      setIsSaving(true)
+      // Faster sync: only update what changed or just replace all in background
+      // To be safe with the current structure, we clear and re-add but with setIsSaving=true
+      const db = getDb()
+      await db.objects.clear()
+      await db.objects.bulkAdd(prevState)
+      setIsSaving(false)
+      setLastSaved(new Date())
       refetch()
     }
   }, [undo, refetch])
@@ -277,13 +293,12 @@ export default function ArchiFieldNote() {
   const handleRedo = useCallback(async () => {
     const nextState = redo()
     if (nextState) {
-      const currentObjects = await db.objects.toArray()
-      for (const obj of currentObjects) {
-        await db.objects.delete(obj.id)
-      }
-      for (const obj of nextState) {
-        await db.objects.add(obj)
-      }
+      setIsSaving(true)
+      const db = getDb()
+      await db.objects.clear()
+      await db.objects.bulkAdd(nextState)
+      setIsSaving(false)
+      setLastSaved(new Date())
       refetch()
     }
   }, [redo, refetch])
@@ -367,7 +382,7 @@ export default function ArchiFieldNote() {
     hatchSpacing: 10,
     hatchLineWidth: 1,
     pointSize: 5,
-    showPoints: type === "polygon",
+    showPoints: false, // Turned off by default as requested
     smoothing: 0.5,
     dashSpacing: 10,
   })

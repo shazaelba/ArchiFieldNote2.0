@@ -65,12 +65,6 @@ export function useProject() {
     fetchData()
   }, [currentProjectId, fetchData])
 
-  // Set up polling for data updates
-  useEffect(() => {
-    const interval = setInterval(fetchData, 500)
-    return () => clearInterval(interval)
-  }, [fetchData])
-
   const addImage = useCallback(
     async (imageData: string) => {
       if (currentProjectId && currentProject) {
