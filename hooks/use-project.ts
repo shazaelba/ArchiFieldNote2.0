@@ -1,46 +1,17 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { getDb, createProject, updateProject, type Project, type MapObject, type Sequence } from "@/lib/db"
+import {
+  getDb,
+  createProject,
+  updateProject,
+  type Project,
+  type MapObject,
+  type Sequence,
+  type MapImage,
+} from "@/lib/db"
 
-function useDexieQuery<T>(queryFn: () => Promise<T>, deps: unknown[] = []): T | undefined {
-  const [result, setResult] = useState<T | undefined>(undefined)
 
-  useEffect(() => {
-    let isMounted = true
-    const db = getDb()
-
-    const runQuery = async () => {
-      try {
-        const data = await queryFn()
-        if (isMounted) {
-          setResult(data)
-        }
-      } catch (error) {
-        console.error("Dexie query error:", error)
-      }
-    }
-
-    // Run initial query
-    runQuery()
-
-    // Subscribe to changes on all tables
-    const subscription = db.on("changes", () => {
-      runQuery()
-    })
-
-    return () => {
-      isMounted = false
-      // Dexie's on() returns an unsubscribe function in newer versions
-      if (typeof subscription === "function") {
-        subscription()
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
-
-  return result
-}
 
 export function useProject() {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null)
@@ -64,7 +35,10 @@ export function useProject() {
       }
 
       const allObjects = await db.objects.toArray()
-      setObjects(allObjects)
+      const projectObjects = currentProjectId
+        ? allObjects.filter(obj => obj.projectId === currentProjectId)
+        : []
+      setObjects(projectObjects)
     } catch (error) {
       console.error("Error fetching data:", error)
     }
@@ -97,14 +71,57 @@ export function useProject() {
     return () => clearInterval(interval)
   }, [fetchData])
 
-  const setBaseMap = useCallback(
+  const addImage = useCallback(
     async (imageData: string) => {
-      if (currentProjectId) {
-        await updateProject(currentProjectId, { baseMapImage: imageData })
+      if (currentProjectId && currentProject) {
+        const newImage: MapImage = {
+          id: crypto.randomUUID(),
+          src: imageData,
+          position: { x: 0, y: 0 },
+          scale: 1,
+          rotation: 0,
+          opacity: 1,
+          locked: false,
+          visible: true,
+          zIndex: currentProject.images.length,
+          grayscale: 0,
+          saturation: 100,
+          brightness: 100,
+          contrast: 100,
+          sepia: 0,
+          blendingMode: "normal",
+        }
+        await updateProject(currentProjectId, {
+          images: [...currentProject.images, newImage],
+        })
         fetchData()
       }
     },
-    [currentProjectId, fetchData],
+    [currentProjectId, currentProject, fetchData],
+  )
+
+  const updateImage = useCallback(
+    async (imageId: string, updates: Partial<MapImage>) => {
+      if (currentProjectId && currentProject) {
+        const updatedImages = currentProject.images.map((img) =>
+          img.id === imageId ? { ...img, ...updates } : img,
+        )
+        await updateProject(currentProjectId, { images: updatedImages })
+        fetchData()
+      }
+    },
+    [currentProjectId, currentProject, fetchData],
+  )
+
+  const deleteImage = useCallback(
+    async (imageId: string) => {
+      if (currentProjectId && currentProject) {
+        const updatedImages = currentProject.images.filter((img) => img.id !== imageId)
+        await updateProject(currentProjectId, { images: updatedImages })
+        fetchData()
+      }
+    },
+    [currentProjectId, currentProject, fetchData],
   )
 
   const setCalibration = useCallback(
@@ -132,7 +149,9 @@ export function useProject() {
     setCurrentProjectId,
     objects,
     sequences,
-    setBaseMap,
+    addImage,
+    updateImage,
+    deleteImage,
     setCalibration,
     refetch: fetchData,
   }

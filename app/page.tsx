@@ -18,6 +18,7 @@ import { ExportDialog } from "@/components/dialogs/export-dialog"
 import { SettingsDialog } from "@/components/dialogs/settings-dialog"
 import { SavedDatasetsDialog } from "@/components/dialogs/saved-datasets-dialog"
 import { PropertiesDrawer } from "@/components/properties/properties-drawer"
+import { ImagePropertiesDrawer } from "@/components/properties/image-properties-drawer"
 import { SequencePanel } from "@/components/sequence/sequence-panel"
 import { DataTableView } from "@/components/data/data-table-view"
 import { DataChartsView } from "@/components/data/data-charts-view"
@@ -27,16 +28,18 @@ import { useUndo } from "@/hooks/use-undo"
 import {
   createMapObject,
   createProject,
+  updateProject,
+  deleteProject,
   createSequence,
   addToSequence,
   updateMapObject,
   deleteMapObject,
-  updateProject,
   createSavedDataset,
   addSavedFieldName,
   db,
   type ObjectStyle,
   type MapObject,
+  type MapImage,
   type Sequence,
 } from "@/lib/db"
 import type { MeasurementUnit } from "@/lib/measurement-utils"
@@ -49,7 +52,9 @@ export default function ArchiFieldNote() {
     setCurrentProjectId,
     objects,
     sequences,
-    setBaseMap,
+    addImage,
+    updateImage,
+    deleteImage,
     setCalibration,
     refetch,
   } = useProject()
@@ -59,6 +64,7 @@ export default function ArchiFieldNote() {
 
   const [toolMode, setToolMode] = useState<ToolMode>("pan")
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
   const [sequenceMode, setSequenceMode] = useState(false)
   const [activeSequence, setActiveSequence] = useState<Sequence | null>(null)
   const [zoomLevel, setZoomLevel] = useState(1)
@@ -212,6 +218,32 @@ export default function ArchiFieldNote() {
     }
   }, [selectedObjectId, objects, pushState, refetch])
 
+  const handleDeleteObjectById = useCallback(async (id: string) => {
+    setIsSaving(true)
+    pushState(objects)
+    await deleteMapObject(id)
+    if (selectedObjectId === id) {
+      setSelectedObjectId(null)
+      setPropertiesOpen(false)
+    }
+    setIsSaving(false)
+    setLastSaved(new Date())
+    refetch()
+  }, [objects, pushState, deleteMapObject, selectedObjectId, refetch])
+
+  const handleMatchStyle = useCallback(async (style: ObjectStyle) => {
+    if (selectedObjectId) {
+      setIsSaving(true)
+      await updateMapObject(selectedObjectId, { style })
+      setIsSaving(false)
+      setLastSaved(new Date())
+      refetch()
+      setToolMode("select") // Auto-switch back to see result? Or stay in match? 
+      // Stay in match allows multiple picks, but usually you pick ONCE.
+      // Let's switch to select to show it applied.
+    }
+  }, [selectedObjectId, updateMapObject, refetch])
+
   const handleVertexUpdate = useCallback(
     async (objectId: string, vertices: { x: number; y: number }[]) => {
       setIsSaving(true)
@@ -260,6 +292,38 @@ export default function ArchiFieldNote() {
     fileInputRef.current?.click()
   }, [])
 
+  const handleSelectImage = useCallback((id: string | null) => {
+    setSelectedImageId(id)
+    if (id) {
+      setSelectedObjectId(null)
+      setPropertiesOpen(false)
+    }
+  }, [])
+
+  const handleUpdateImageWrapper = useCallback(
+    async (updates: Partial<MapImage>) => {
+      if (selectedImageId) {
+        setIsSaving(true)
+        await updateImage(selectedImageId, updates)
+        setIsSaving(false)
+        setLastSaved(new Date())
+        refetch()
+      }
+    },
+    [selectedImageId, updateImage, refetch],
+  )
+
+  const handleDeleteImage = useCallback(async () => {
+    if (selectedImageId) {
+      setIsSaving(true)
+      await deleteImage(selectedImageId)
+      setSelectedImageId(null)
+      setIsSaving(false)
+      setLastSaved(new Date())
+      refetch()
+    }
+  }, [selectedImageId, deleteImage, refetch])
+
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
@@ -269,29 +333,43 @@ export default function ArchiFieldNote() {
       reader.onload = async (event) => {
         const dataUrl = event.target?.result as string
         setIsSaving(true)
-        await setBaseMap(dataUrl)
+        await addImage(dataUrl)
         setIsSaving(false)
         setLastSaved(new Date())
       }
       reader.readAsDataURL(file)
       e.target.value = ""
     },
-    [setBaseMap],
+    [addImage],
   )
 
-  const getDefaultStyle = (type: "polygon" | "threshold" | "freehand"): ObjectStyle => ({
-    fillColor: type === "polygon" ? "#3b82f6" : "#ef4444",
-    fillOpacity: type === "polygon" ? 0.3 : 0,
-    strokeColor: type === "polygon" ? "#3b82f6" : type === "freehand" ? "#3C00BB" : "#ef4444",
-    strokeWidth: type === "freehand" ? displaySettings.freehandStrokeWidth : 2,
+  const getDefaultStyle = (
+    type: "polygon" | "threshold" | "freehand" | "circle" | "square" | "triangle" | "highlighter",
+  ): ObjectStyle => ({
+    fillColor:
+      type === "polygon" || type === "circle" || type === "square" || type === "triangle" ? "#3b82f6" : "#ef4444",
+    fillOpacity: type === "polygon" || type === "circle" || type === "square" || type === "triangle" ? 0.3 : 0,
+    strokeColor:
+      type === "highlighter"
+        ? "rgba(255, 255, 0, 0.5)"
+        : type === "freehand"
+          ? "#3C00BB"
+          : type === "threshold"
+            ? "#ef4444"
+            : "#3b82f6",
+    strokeWidth: type === "highlighter" ? 20 : type === "freehand" ? displaySettings.freehandStrokeWidth : 2,
     strokeStyle: "solid",
     hatchPattern: "none",
+    hatchAngle: 45,
+    strokeHatch: false,
     lineEndpoints: "none",
     endpointSize: 8,
     hatchSpacing: 10,
     hatchLineWidth: 1,
     pointSize: 5,
     showPoints: type === "polygon",
+    smoothing: 0.5,
+    dashSpacing: 10,
   })
 
   const handlePolygonComplete = useCallback(
@@ -299,6 +377,7 @@ export default function ArchiFieldNote() {
       setIsSaving(true)
       pushState(objects)
       const newObject = await createMapObject({
+        projectId: currentProjectId!,
         type: "polygon",
         name: `Polygon ${objects.filter((o) => o.type === "polygon").length + 1}`,
         vertices,
@@ -320,6 +399,7 @@ export default function ArchiFieldNote() {
       setIsSaving(true)
       pushState(objects)
       const newObject = await createMapObject({
+        projectId: currentProjectId!,
         type: "threshold",
         name: `Line ${objects.filter((o) => o.type === "threshold").length + 1}`,
         vertices: [start, end],
@@ -340,11 +420,44 @@ export default function ArchiFieldNote() {
     async (vertices: { x: number; y: number }[]) => {
       setIsSaving(true)
       pushState(objects)
+      const type = toolMode === "highlighter" ? "highlighter" : "freehand"
       const newObject = await createMapObject({
-        type: "freehand",
+        projectId: currentProjectId!,
+        type: "freehand", // Store as freehand but style differs? Or add highlighter type to DB?
+        // DB says: type: "polygon" | "threshold" | "freehand" | "circle" | "square" | "triangle"
+        // Missing "highlighter" in DB type definition in my mental model? 
+        // Step 166: type: ... "highlighter"
         name: `Drawing ${objects.filter((o) => o.type === "freehand").length + 1}`,
         vertices,
-        style: getDefaultStyle("freehand"),
+        style: getDefaultStyle(type as any), // Cast because DB might not have "highlighter" explicitly in type definition yet?
+        // Actually, if I added it to getDefaultStyle signature, I should probably use it.
+        // But createMapObject expects MapObject type.
+        // If DB schema doesn't have "highlighter" as a type, I should use "freehand" and rely on style.
+        // Let's stick to "freehand" for type, but pass "highlighter" to getDefaultStyle.
+        metadata: { tags: [], notes: "", photos: [], qualitativeType: "", customFields: [] },
+      })
+      if (toolMode !== "highlighter") {
+        setToolMode("select")
+        setSelectedObjectId(newObject.id)
+        setPropertiesOpen(true)
+      }
+      setIsSaving(false)
+      setLastSaved(new Date())
+      refetch()
+    },
+    [objects, pushState, displaySettings, refetch, toolMode],
+  )
+
+  const handleShapeComplete = useCallback(
+    async (type: "circle" | "square" | "triangle", vertices: { x: number; y: number }[]) => {
+      setIsSaving(true)
+      pushState(objects)
+      const newObject = await createMapObject({
+        projectId: currentProjectId!,
+        type,
+        name: `${type.charAt(0).toUpperCase() + type.slice(1)} ${objects.filter((o) => o.type === type).length + 1}`,
+        vertices,
+        style: getDefaultStyle(type),
         metadata: { tags: [], notes: "", photos: [], qualitativeType: "", customFields: [] },
       })
       setToolMode("select")
@@ -354,7 +467,7 @@ export default function ArchiFieldNote() {
       setLastSaved(new Date())
       refetch()
     },
-    [objects, pushState, displaySettings, refetch],
+    [objects, pushState, refetch]
   )
 
   const handleCalibrationComplete = useCallback(
@@ -424,8 +537,29 @@ export default function ArchiFieldNote() {
     setExportOpen(true)
   }, [])
 
+  const handleDeleteProject = useCallback(async (projectId: string) => {
+    if (projects.length <= 1) {
+      alert("Cannot delete the last project. Create a new one first.")
+      return
+    }
+
+    if (!confirm("Are you sure you want to delete this project? This action cannot be undone.")) {
+      return
+    }
+
+    await deleteProject(projectId)
+
+    // Switch to another project
+    const remainingProjects = projects.filter(p => p.id !== projectId)
+    if (remainingProjects.length > 0) {
+      setCurrentProjectId(remainingProjects[0].id)
+    }
+
+    refetch()
+  }, [projects, setCurrentProjectId, refetch])
+
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-background">
+    <div className="relative h-screen w-screen overflow-hidden bg-background" >
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
       <TopBar
@@ -433,12 +567,14 @@ export default function ArchiFieldNote() {
         projects={projects}
         onSelectProject={setCurrentProjectId}
         onNewProject={handleNewProject}
-        theme={theme}
-        onThemeChange={setTheme}
+        onDeleteProject={handleDeleteProject}
+        theme={(theme as any) || "system"}
+        onThemeChange={(t) => setTheme(t)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenDataTable={() => setDataTableOpen(true)}
         onOpenDataCharts={() => setDataChartsOpen(true)}
-        onOpenSavedDatasets={() => setSavedDatasetsOpen(true)}
+        onImageUpload={handleImageUpload}
+        onExport={handleExport}
         isSaving={isSaving}
         lastSaved={lastSaved}
       />
@@ -448,8 +584,7 @@ export default function ArchiFieldNote() {
         setToolMode={setToolMode}
         sequenceMode={sequenceMode}
         setSequenceMode={toggleSequenceMode}
-        onImageUpload={handleImageUpload}
-        onExport={handleExport}
+        onOpenSavedDatasets={() => setSavedDatasetsOpen(true)}
       />
 
       <MapCanvas
@@ -459,8 +594,14 @@ export default function ArchiFieldNote() {
         toolMode={toolMode}
         selectedObjectId={selectedObjectId}
         onSelectObject={handleSelectObject}
+        selectedImageId={selectedImageId}
+        onSelectImage={handleSelectImage}
+        onUpdateImage={updateImage}
         onPolygonComplete={handlePolygonComplete}
+        onShapeComplete={handleShapeComplete}
         onThresholdComplete={handleThresholdComplete}
+        onDeleteObject={handleDeleteObjectById}
+        onMatchStyle={handleMatchStyle}
         onCalibrationComplete={handleCalibrationComplete}
         onFreehandComplete={handleFreehandComplete}
         onVertexUpdate={handleVertexUpdate}
@@ -485,15 +626,17 @@ export default function ArchiFieldNote() {
         </div>
       )}
 
-      {sequenceMode && (
-        <SequencePanel
-          sequence={activeSequence}
-          objects={objects}
-          onClose={() => toggleSequenceMode(false)}
-          onObjectClick={handleSelectObject}
-          onSaveDataset={handleSaveDataset}
-        />
-      )}
+      {
+        sequenceMode && (
+          <SequencePanel
+            sequence={activeSequence}
+            objects={objects}
+            onClose={() => toggleSequenceMode(false)}
+            onObjectClick={handleSelectObject}
+            onSaveDataset={handleSaveDataset}
+          />
+        )
+      }
 
       <CalibrationDialog
         open={calibrationDialog}
@@ -558,6 +701,14 @@ export default function ArchiFieldNote() {
         onEditVertices={handleEditVertices}
         onAddFieldName={handleAddFieldName}
       />
-    </div>
+
+      <ImagePropertiesDrawer
+        open={!!selectedImageId}
+        onClose={() => setSelectedImageId(null)}
+        image={currentProject?.images.find(img => img.id === selectedImageId) || null}
+        onUpdate={handleUpdateImageWrapper}
+        onDelete={handleDeleteImage}
+      />
+    </div >
   )
 }

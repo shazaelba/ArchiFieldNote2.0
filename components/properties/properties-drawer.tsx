@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Trash2, Plus, Camera, X, Edit3 } from "lucide-react"
 import type { MapObject, ObjectStyle, ObjectMetadata, CustomField } from "@/lib/db"
-import { getPolygonArea, getLineLength } from "@/lib/canvas-utils"
+import { getPolygonArea, getLineLength, getPolylineLength, getDistance } from "@/lib/canvas-utils"
 import { formatMeasurement, type MeasurementUnit } from "@/lib/measurement-utils"
 
 interface PropertiesDrawerProps {
@@ -169,6 +169,23 @@ export function PropertiesDrawer({
     } else if (object.type === "threshold" && object.vertices.length === 2) {
       const lengthInMeters = getLineLength(object.vertices[0], object.vertices[1], pixelToMeterRatio)
       return formatMeasurement(lengthInMeters, measurementUnit, false)
+    } else if (object.type === "freehand") {
+      const lengthInMeters = getPolylineLength(object.vertices, pixelToMeterRatio)
+      return formatMeasurement(lengthInMeters, measurementUnit, false)
+    } else if (object.type === "square" && object.vertices.length === 2) {
+      const w = Math.abs(object.vertices[1].x - object.vertices[0].x)
+      const h = Math.abs(object.vertices[1].y - object.vertices[0].y)
+      const area = (w * h) / (pixelToMeterRatio * pixelToMeterRatio)
+      return formatMeasurement(area, measurementUnit, true)
+    } else if (object.type === "circle" && object.vertices.length === 2) {
+      const r = getDistance(object.vertices[0], object.vertices[1])
+      const area = (Math.PI * r * r) / (pixelToMeterRatio * pixelToMeterRatio)
+      return formatMeasurement(area, measurementUnit, true)
+    } else if (object.type === "triangle" && object.vertices.length === 2) {
+      const w = Math.abs(object.vertices[1].x - object.vertices[0].x)
+      const h = Math.abs(object.vertices[1].y - object.vertices[0].y)
+      const area = (0.5 * w * h) / (pixelToMeterRatio * pixelToMeterRatio)
+      return formatMeasurement(area, measurementUnit, true)
     }
     return null
   }
@@ -183,10 +200,16 @@ export function PropertiesDrawer({
         <SheetHeader>
           <SheetTitle className="flex items-center justify-between text-base sm:text-lg">
             <span>
-              {object.type === "polygon" ? "Polygon" : object.type === "threshold" ? "Line" : "Freehand"} Properties
+              {object.type === "polygon"
+                ? "Polygon"
+                : object.type === "threshold"
+                  ? "Line"
+                  : ["circle", "square", "triangle"].includes(object.type)
+                    ? object.type.charAt(0).toUpperCase() + object.type.slice(1)
+                    : "Freehand"} Properties
             </span>
             <div className="flex gap-1">
-              {(object.type === "polygon" || object.type === "threshold") && (
+              {(object.type === "polygon" || object.type === "threshold" || ["circle", "square", "triangle"].includes(object.type)) && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -239,14 +262,14 @@ export function PropertiesDrawer({
             {measurement && pixelToMeterRatio && (
               <div className="rounded-lg bg-muted p-2 sm:p-3">
                 <span className="text-xs text-muted-foreground sm:text-sm">
-                  {object.type === "polygon" ? "Area" : "Length"}:
+                  {object.type === "polygon" || ["circle", "square", "triangle"].includes(object.type) ? "Area" : "Length"}:
                 </span>
                 <span className="ml-2 font-mono text-base font-semibold text-foreground sm:text-lg">{measurement}</span>
               </div>
             )}
 
-            {/* Point settings for polygons */}
-            {object.type === "polygon" && (
+            {/* Point settings for polygons and shapes */}
+            {(object.type === "polygon" || ["circle", "square", "triangle"].includes(object.type)) && (
               <>
                 <div className="flex items-center justify-between">
                   <Label className="text-xs sm:text-sm">Show Points</Label>
@@ -270,33 +293,42 @@ export function PropertiesDrawer({
               </>
             )}
 
-            {/* Fill Color (Polygons only) */}
-            {object.type === "polygon" && (
+            {/* Fill Color (Polygons and Shapes) */}
+            {(object.type === "polygon" || ["circle", "square", "triangle"].includes(object.type)) && (
               <div className="space-y-2">
                 <Label className="text-xs sm:text-sm">Fill Color</Label>
                 <div className="flex flex-wrap gap-2">
                   {PRESET_COLORS.map((color) => (
                     <button
                       key={color}
-                      className={`h-7 w-7 rounded-full border-2 transition-transform sm:h-8 sm:w-8 ${
-                        object.style.fillColor === color ? "scale-110 border-foreground" : "border-transparent"
-                      }`}
+                      className={`h-8 w-8 rounded-lg border-2 transition-all duration-200 ${object.style.fillColor === color
+                        ? "border-primary ring-2 ring-primary ring-offset-2 ring-offset-background scale-110"
+                        : "border-transparent"
+                        }`}
                       style={{ backgroundColor: color }}
                       onClick={() => updateStyle({ fillColor: color })}
                     />
                   ))}
-                  <input
-                    type="color"
-                    value={object.style.fillColor}
-                    onChange={(e) => updateStyle({ fillColor: e.target.value })}
-                    className="h-7 w-7 cursor-pointer rounded-full sm:h-8 sm:w-8"
-                  />
+                  <div className="relative h-8 w-8">
+                    <input
+                      type="color"
+                      value={object.style.fillColor}
+                      onChange={(e) => updateStyle({ fillColor: e.target.value })}
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    />
+                    <div
+                      className="h-full w-full rounded-lg border-2 border-dashed border-muted-foreground flex items-center justify-center"
+                      style={{ backgroundColor: !PRESET_COLORS.includes(object.style.fillColor) ? object.style.fillColor : 'transparent' }}
+                    >
+                      {!PRESET_COLORS.includes(object.style.fillColor) ? null : <span className="text-[10px]">+</span>}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Fill Opacity (Polygons only) */}
-            {object.type === "polygon" && (
+            {/* Fill Opacity (Polygons and Shapes) */}
+            {(object.type === "polygon" || ["circle", "square", "triangle"].includes(object.type)) && (
               <div className="space-y-2">
                 <Label className="text-xs sm:text-sm">
                   Fill Opacity: {Math.round(object.style.fillOpacity * 100)}%
@@ -313,58 +345,81 @@ export function PropertiesDrawer({
             )}
 
             {/* Stroke Color */}
-            <div className="space-y-2">
-              <Label className="text-xs sm:text-sm">Stroke Color</Label>
-              <div className="flex flex-wrap gap-2">
-                {PRESET_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    className={`h-7 w-7 rounded-full border-2 transition-transform sm:h-8 sm:w-8 ${
-                      object.style.strokeColor === color ? "scale-110 border-foreground" : "border-transparent"
-                    }`}
-                    style={{ backgroundColor: color }}
-                    onClick={() => updateStyle({ strokeColor: color })}
+            {object.style.strokeStyle !== "none" && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs sm:text-sm">Stroke Color</Label>
+                  <div
+                    className="h-6 w-6 rounded border border-input sm:h-8 sm:w-8"
+                    style={{ backgroundColor: object.style.strokeColor }}
                   />
-                ))}
-                <input
-                  type="color"
-                  value={object.style.strokeColor}
-                  onChange={(e) => updateStyle({ strokeColor: e.target.value })}
-                  className="h-7 w-7 cursor-pointer rounded-full sm:h-8 sm:w-8"
-                />
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={object.style.strokeColor}
+                    onChange={(e) => updateStyle({ strokeColor: e.target.value })}
+                    className="min-h-[36px] font-mono sm:min-h-[40px]"
+                  />
+                  <input
+                    type="color"
+                    value={object.style.strokeColor}
+                    onChange={(e) => updateStyle({ strokeColor: e.target.value })}
+                    className="h-7 w-7 cursor-pointer rounded-full sm:h-8 sm:w-8"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Stroke Width */}
-            <div className="space-y-2">
-              <Label className="text-xs sm:text-sm">Stroke Width: {object.style.strokeWidth}px</Label>
-              <Slider
-                value={[object.style.strokeWidth]}
-                onValueChange={([value]) => updateStyle({ strokeWidth: value })}
-                min={1}
-                max={10}
-                step={1}
-                className="py-2"
-              />
-            </div>
+            {object.style.strokeStyle !== "none" && (
+              <div className="space-y-2">
+                <Label className="text-xs sm:text-sm">Stroke Width: {object.style.strokeWidth}px</Label>
+                <Slider
+                  value={[object.style.strokeWidth]}
+                  onValueChange={([value]) => updateStyle({ strokeWidth: value })}
+                  min={1}
+                  max={10}
+                  step={1}
+                  className="py-2"
+                />
+              </div>
+            )}
 
             {/* Stroke Style */}
             <div className="space-y-2">
-              <Label className="text-xs sm:text-sm">Line Style</Label>
+              <Label className="text-xs sm:text-sm">Stroke Style</Label>
               <Select
-                value={object.style.strokeStyle}
-                onValueChange={(value: "solid" | "dashed" | "dotted") => updateStyle({ strokeStyle: value })}
+                value={object.style.strokeStyle || "solid"}
+                onValueChange={(value: "solid" | "dashed" | "dotted" | "none") => updateStyle({ strokeStyle: value })}
               >
                 <SelectTrigger className="min-h-[40px] sm:min-h-[44px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  {["polygon", "circle", "square", "triangle", "freehand", "threshold"].includes(object.type) && (
+                    <SelectItem value="none">None</SelectItem>
+                  )}
                   <SelectItem value="solid">Solid</SelectItem>
                   <SelectItem value="dashed">Dashed</SelectItem>
                   <SelectItem value="dotted">Dotted</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Dash Spacing */}
+            {(object.style.strokeStyle === "dashed" || object.style.strokeStyle === "dotted") && (
+              <div className="space-y-2">
+                <Label className="text-xs sm:text-sm">Dash Spacing: {object.style.dashSpacing || 5}px</Label>
+                <Slider
+                  value={[object.style.dashSpacing || 5]}
+                  onValueChange={([value]) => updateStyle({ dashSpacing: value })}
+                  min={2}
+                  max={50}
+                  step={1}
+                  className="py-2"
+                />
+              </div>
+            )}
 
             {/* Line endpoint options */}
             {object.type === "threshold" && (

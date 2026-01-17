@@ -31,19 +31,19 @@ export function ScaleBar({ pixelToMeterRatio, zoomLevel }: ScaleBarProps) {
 
   if (!scaleInfo) {
     return (
-      <div className="absolute bottom-32 left-2 z-10 rounded-lg bg-background/90 px-2 py-1.5 text-xs text-muted-foreground backdrop-blur-sm sm:bottom-20 sm:left-4 sm:px-3 sm:py-2 sm:text-sm">
+      <div className="absolute bottom-2 left-[calc(50%-160px)] z-10 -translate-x-full rounded-lg bg-background/90 px-2 py-1.5 text-[10px] text-muted-foreground backdrop-blur-sm sm:bottom-4 sm:left-[calc(50%-200px)] sm:px-3 sm:py-2 sm:text-xs">
         Scale not calibrated
       </div>
     )
   }
 
   return (
-    <div className="absolute bottom-32 left-2 z-10 flex flex-col items-start gap-1 rounded-lg bg-background/90 px-2 py-1.5 backdrop-blur-sm sm:bottom-20 sm:left-4 sm:px-3 sm:py-2">
+    <div className="absolute bottom-2 left-[calc(50%-160px)] z-10 flex -translate-x-full flex-col items-start gap-0.5 rounded-lg bg-background/90 px-2 py-1 backdrop-blur-sm sm:bottom-4 sm:left-[calc(50%-200px)] sm:px-3 sm:py-1.5">
       <div
-        className="h-1.5 border-b-2 border-l-2 border-r-2 border-foreground sm:h-2"
-        style={{ width: `${Math.min(scaleInfo.width, 150)}px` }}
+        className="h-1 border-b-2 border-l-2 border-r-2 border-foreground sm:h-1.5"
+        style={{ width: `${Math.min(scaleInfo.width, 100)}px` }}
       />
-      <span className="text-[10px] font-medium text-foreground sm:text-xs">{scaleInfo.label}</span>
+      <span className="text-[9px] font-medium text-foreground sm:text-[10px]">{scaleInfo.label}</span>
     </div>
   )
 }

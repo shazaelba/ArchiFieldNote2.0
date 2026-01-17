@@ -107,7 +107,12 @@ export function DataChartsView({ open, onClose, objects, pixelToMeterRatio }: Da
                           innerRadius={50}
                           outerRadius={80}
                           dataKey="value"
-                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                          label={({ name, percent }) => {
+                            const shortName = name.length > 8 ? name.slice(0, 8) + ".." : name
+                            return `${shortName} ${(percent * 100).toFixed(0)}%`
+                          }}
+                          labelLine={false}
+                          style={{ fontSize: '10px' }}
                         >
                           {typeData.map((_, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -136,9 +141,12 @@ export function DataChartsView({ open, onClose, objects, pixelToMeterRatio }: Da
                           innerRadius={50}
                           outerRadius={80}
                           dataKey="value"
-                          label={({ name, percent }) =>
-                            `${name.length > 10 ? name.slice(0, 10) + "..." : name} (${(percent * 100).toFixed(0)}%)`
-                          }
+                          label={({ name, percent }) => {
+                            const shortName = name.length > 6 ? name.slice(0, 6) + ".." : name
+                            return `${shortName} ${(percent * 100).toFixed(0)}%`
+                          }}
+                          labelLine={false}
+                          style={{ fontSize: '10px' }}
                         >
                           {categoryData.map((_, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />

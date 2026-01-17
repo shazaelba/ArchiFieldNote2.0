@@ -3,14 +3,13 @@
 import type React from "react"
 
 import { useRef, useEffect, useCallback } from "react"
-import type { MapObject } from "@/lib/db"
+import type { MapObject, MapImage } from "@/lib/db"
 
 interface ZoomPreviewProps {
   canvasSize: { width: number; height: number }
   viewportRect: { x: number; y: number; width: number; height: number } | null
-  baseMapImage: HTMLImageElement | null
-  baseMapPosition?: { x: number; y: number }
-  baseMapScale?: number
+  loadedImages: Record<string, HTMLImageElement>
+  images: MapImage[]
   objects: MapObject[]
   onPreviewClick: (x: number, y: number) => void
   className?: string
@@ -19,9 +18,8 @@ interface ZoomPreviewProps {
 export function ZoomPreview({
   canvasSize,
   viewportRect,
-  baseMapImage,
-  baseMapPosition,
-  baseMapScale,
+  loadedImages,
+  images,
   objects,
   onPreviewClick,
   className,
@@ -35,6 +33,7 @@ export function ZoomPreview({
   const scale = Math.min(PREVIEW_WIDTH / effectiveCanvasSize.width, PREVIEW_HEIGHT / effectiveCanvasSize.height)
 
   const safeObjects = objects ?? []
+  const safeImages = images ?? []
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -49,16 +48,24 @@ export function ZoomPreview({
     ctx.save()
     ctx.scale(scale, scale)
 
-    // Draw base map thumbnail
-    if (baseMapImage) {
-      ctx.drawImage(
-        baseMapImage,
-        baseMapPosition?.x || 0,
-        baseMapPosition?.y || 0,
-        baseMapImage.width * (baseMapScale || 1),
-        baseMapImage.height * (baseMapScale || 1),
-      )
-    }
+    // Draw images
+    const sortedImages = [...safeImages].sort((a, b) => a.zIndex - b.zIndex)
+    sortedImages.forEach(imgData => {
+      const img = loadedImages[imgData.id]
+      if (img && imgData.visible) {
+        ctx.save()
+        // Simplified drawing for preview (no complex blending for now)
+        ctx.globalAlpha = imgData.opacity
+
+        const x = imgData.position.x
+        const y = imgData.position.y
+        const w = img.width * imgData.scale
+        const h = img.height * imgData.scale
+
+        ctx.drawImage(img, x, y, w, h)
+        ctx.restore()
+      }
+    })
 
     // Draw objects
     safeObjects.forEach((obj) => {
@@ -101,7 +108,7 @@ export function ZoomPreview({
         viewportRect.height * scale,
       )
     }
-  }, [safeObjects, scale, viewportRect, baseMapImage, baseMapPosition, baseMapScale])
+  }, [safeObjects, safeImages, loadedImages, scale, viewportRect])
 
   useEffect(() => {
     draw()

@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Map, ChevronDown, Sun, Moon, Monitor, Settings, Table, BarChart3, Check, FolderOpen } from "lucide-react"
+import { Map, ChevronDown, Sun, Moon, Monitor, Settings, Table, BarChart3, Check, FolderOpen, Trash2, ImageIcon, Download } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,12 +17,14 @@ interface TopBarProps {
   projects: Project[]
   onSelectProject: (id: string) => void
   onNewProject: () => void
+  onDeleteProject?: (id: string) => void
   theme: "light" | "dark" | "system"
   onThemeChange: (theme: "light" | "dark" | "system") => void
   onOpenSettings: () => void
   onOpenDataTable: () => void
   onOpenDataCharts: () => void
-  onOpenSavedDatasets: () => void
+  onImageUpload: () => void
+  onExport: () => void
   isSaving?: boolean
   lastSaved?: Date | null
 }
@@ -32,12 +34,14 @@ export function TopBar({
   projects,
   onSelectProject,
   onNewProject,
+  onDeleteProject,
   theme,
   onThemeChange,
   onOpenSettings,
   onOpenDataTable,
   onOpenDataCharts,
-  onOpenSavedDatasets,
+  onImageUpload,
+  onExport,
   isSaving,
   lastSaved,
 }: TopBarProps) {
@@ -72,16 +76,6 @@ export function TopBar({
           variant="outline"
           size="icon"
           className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]"
-          onClick={onOpenSavedDatasets}
-          title="Saved Journeys"
-        >
-          <FolderOpen className="h-4 w-4 sm:h-5 sm:w-5" />
-        </Button>
-
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]"
           onClick={onOpenDataTable}
           title="Data Table"
         >
@@ -96,6 +90,28 @@ export function TopBar({
           title="Charts"
         >
           <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5" />
+        </Button>
+
+        <div className="mx-0.5 h-6 w-px bg-border sm:mx-1 sm:h-8" />
+
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]"
+          onClick={onImageUpload}
+          title="Upload Base Map"
+        >
+          <ImageIcon className="h-4 w-4 sm:h-5 sm:w-5" />
+        </Button>
+
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-10 w-10 bg-transparent sm:min-h-[44px] sm:min-w-[44px]"
+          onClick={onExport}
+          title="Export"
+        >
+          <Download className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
 
         <div className="mx-0.5 hidden h-8 w-px bg-border sm:mx-1 sm:block" />
@@ -146,9 +162,27 @@ export function TopBar({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             {projects.map((p) => (
-              <DropdownMenuItem key={p.id} onClick={() => onSelectProject(p.id)}>
-                {p.name}
-              </DropdownMenuItem>
+              <div key={p.id} className="flex items-center justify-between">
+                <DropdownMenuItem
+                  onClick={() => onSelectProject(p.id)}
+                  className="flex-1"
+                >
+                  {p.name}
+                </DropdownMenuItem>
+                {onDeleteProject && projects.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onDeleteProject(p.id)
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
             ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onNewProject}>+ New Project</DropdownMenuItem>

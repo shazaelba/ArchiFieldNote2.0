@@ -4,12 +4,25 @@ import type React from "react"
 
 import { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react"
 import { TransformWrapper, TransformComponent, type ReactZoomPanPinchRef } from "react-zoom-pan-pinch"
-import type { Project, MapObject } from "@/lib/db"
-import { getDistance, isPointInPolygon, isPointNearLine, isPointNearPath, drawHatchPattern } from "@/lib/canvas-utils"
+import type { Project, MapObject, ObjectStyle, MapImage } from "@/lib/db"
+import { hitTestObject, getDistance, isPointInPolygon, isPointNearLine, isPointNearPath, drawHatchPattern } from "@/lib/canvas-utils"
 import { BottomControls } from "./bottom-controls"
 import { ZoomPreview } from "./zoom-preview"
 
-export type ToolMode = "select" | "pan" | "polygon" | "threshold" | "calibrate" | "freehand" | "editVertices"
+export type ToolMode =
+  | "select"
+  | "pan"
+  | "polygon"
+  | "threshold"
+  | "calibrate"
+  | "freehand"
+  | "editVertices"
+  | "eraser"
+  | "highlighter"
+  | "circle"
+  | "square"
+  | "triangle"
+  | "match"
 
 export interface DisplaySettings {
   pointSize: number
@@ -27,8 +40,14 @@ interface MapCanvasProps {
   toolMode: ToolMode
   selectedObjectId: string | null
   onSelectObject: (id: string | null) => void
+  selectedImageId?: string | null
+  onSelectImage?: (id: string | null) => void
+  onUpdateImage?: (id: string, updates: Partial<MapImage>) => void
   onPolygonComplete: (vertices: { x: number; y: number }[]) => void
+  onShapeComplete?: (type: "circle" | "square" | "triangle", vertices: { x: number; y: number }[]) => void
   onThresholdComplete: (start: { x: number; y: number }, end: { x: number; y: number }) => void
+  onDeleteObject?: (id: string) => void
+  onMatchStyle?: (style: ObjectStyle) => void
   onCalibrationComplete: (start: { x: number; y: number }, end: { x: number; y: number }, pixelDistance: number) => void
   onFreehandComplete: (vertices: { x: number; y: number }[]) => void
   onVertexUpdate: (objectId: string, vertices: { x: number; y: number }[]) => void
@@ -62,8 +81,14 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
     toolMode,
     selectedObjectId,
     onSelectObject,
+    selectedImageId,
+    onSelectImage,
+    onUpdateImage,
     onPolygonComplete,
+    onShapeComplete,
     onThresholdComplete,
+    onDeleteObject,
+    onMatchStyle,
     onCalibrationComplete,
     onFreehandComplete,
     onVertexUpdate,
@@ -87,31 +112,56 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
 
   const [drawingVertices, setDrawingVertices] = useState<{ x: number; y: number }[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
-  const [baseMapImage, setBaseMapImage] = useState<HTMLImageElement | null>(null)
+  const [loadedImages, setLoadedImages] = useState<Record<string, HTMLImageElement>>({})
   const [canvasSize, setCanvasSize] = useState({ width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT })
   const [zoomLevel, setZoomLevel] = useState(1)
   const [viewportRect, setViewportRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
 
   const [editingVertexIndex, setEditingVertexIndex] = useState<number | null>(null)
   const [isDraggingVertex, setIsDraggingVertex] = useState(false)
+  const [draggingImageId, setDraggingImageId] = useState<string | null>(null)
+  const [transientImagePosition, setTransientImagePosition] = useState<{ x: number; y: number } | null>(null)
 
-  // Load base map image
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null)
+  const initialImagePosRef = useRef<{ x: number; y: number } | null>(null)
+
+  // Load images
   useEffect(() => {
-    if (project?.baseMapImage) {
-      const img = new Image()
-      img.crossOrigin = "anonymous"
-      img.onload = () => {
-        setBaseMapImage(img)
-        const width = Math.max(DEFAULT_CANVAS_WIDTH, img.width + 4000)
-        const height = Math.max(DEFAULT_CANVAS_HEIGHT, img.height + 4000)
-        setCanvasSize({ width, height })
+    if (project?.images) {
+      const newImages: Record<string, HTMLImageElement> = {}
+      let loadedCount = 0
+      const totalImages = project.images.length
+
+      if (totalImages === 0) {
+        setLoadedImages({})
+        return
       }
-      img.src = project.baseMapImage
+
+      project.images.forEach(imgData => {
+        const img = new Image()
+        img.crossOrigin = "anonymous"
+        img.onload = () => {
+          newImages[imgData.id] = img
+          loadedCount++
+          if (loadedCount === totalImages) {
+            setLoadedImages(prev => ({ ...prev, ...newImages }))
+
+            // Update canvas size to fit all images (simplified logic for now)
+            // Ideally we calculate bounding box of all images
+            const maxW = Math.max(DEFAULT_CANVAS_WIDTH, img.width + 4000)
+            const maxH = Math.max(DEFAULT_CANVAS_HEIGHT, img.height + 4000)
+            setCanvasSize(prev => ({
+              width: Math.max(prev.width, maxW),
+              height: Math.max(prev.height, maxH)
+            }))
+          }
+        }
+        img.src = imgData.src
+      })
     } else {
-      setBaseMapImage(null)
-      setCanvasSize({ width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT })
+      setLoadedImages({})
     }
-  }, [project?.baseMapImage])
+  }, [project?.images])
 
   // Update viewport rect for preview
   const updateViewportRect = useCallback(() => {
@@ -230,14 +280,42 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
 
     drawGrid(ctx, canvas.width, canvas.height)
 
-    if (baseMapImage) {
-      ctx.drawImage(
-        baseMapImage,
-        project?.baseMapPosition.x || 0,
-        project?.baseMapPosition.y || 0,
-        baseMapImage.width * (project?.baseMapScale || 1),
-        baseMapImage.height * (project?.baseMapScale || 1),
-      )
+    // Draw images
+    if (project?.images) {
+      // Sort by z-index
+      const sortedImages = [...project.images].sort((a, b) => a.zIndex - b.zIndex)
+
+      for (const imgData of sortedImages) {
+        if (!imgData.visible) continue
+
+        const img = loadedImages[imgData.id]
+        if (!img) continue
+
+        let position = imgData.position
+        if (draggingImageId === imgData.id && transientImagePosition) {
+          position = transientImagePosition
+        }
+
+        ctx.save()
+        ctx.translate(position.x, position.y)
+        ctx.rotate((imgData.rotation || 0) * (Math.PI / 180))
+        ctx.scale(imgData.scale, imgData.scale)
+
+        ctx.globalAlpha = imgData.opacity
+        if (imgData.blendingMode) {
+          ctx.globalCompositeOperation = imgData.blendingMode as GlobalCompositeOperation
+        }
+
+        ctx.drawImage(img, 0, 0)
+
+        if (selectedImageId === imgData.id) {
+          ctx.strokeStyle = "#3b82f6"
+          ctx.lineWidth = 2 / (imgData.scale * zoomLevel)
+          ctx.strokeRect(0, 0, img.width, img.height)
+        }
+
+        ctx.restore()
+      }
     }
 
     // Draw objects
@@ -277,9 +355,22 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
           )
         }
 
-        ctx.strokeStyle = isSelected ? "#3C00BB" : obj.style.strokeColor
-        ctx.lineWidth = isSelected ? obj.style.strokeWidth + 2 : obj.style.strokeWidth
-        ctx.stroke()
+        if (obj.style.strokeStyle !== "none") {
+          ctx.strokeStyle = isSelected ? "#3C00BB" : obj.style.strokeColor
+          ctx.lineWidth = isSelected ? obj.style.strokeWidth + 2 : obj.style.strokeWidth
+
+          const dash = obj.style.dashSpacing || 10
+          if (obj.style.strokeStyle === "dashed") {
+            ctx.setLineDash([dash, dash])
+          } else if (obj.style.strokeStyle === "dotted") {
+            ctx.setLineDash([2, dash])
+          }
+          ctx.stroke()
+        } else if (isSelected) {
+          ctx.strokeStyle = "#3C00BB"
+          ctx.lineWidth = 2
+          ctx.stroke()
+        }
 
         if (showPoints || isEditing || isSelected) {
           obj.vertices.forEach((v, idx) => {
@@ -305,10 +396,11 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
         ctx.strokeStyle = isSelected ? "#3C00BB" : obj.style.strokeColor
         ctx.lineWidth = isSelected ? obj.style.strokeWidth + 2 : obj.style.strokeWidth
 
+        const dash = obj.style.dashSpacing || 10
         if (obj.style.strokeStyle === "dashed") {
-          ctx.setLineDash([15, 10])
+          ctx.setLineDash([dash, dash])
         } else if (obj.style.strokeStyle === "dotted") {
-          ctx.setLineDash([5, 5])
+          ctx.setLineDash([2, dash])
         }
 
         ctx.stroke()
@@ -363,14 +455,106 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
         ctx.lineCap = "round"
         ctx.lineJoin = "round"
 
+        const dash = obj.style.dashSpacing || 10
         if (obj.style.strokeStyle === "dashed") {
-          ctx.setLineDash([15, 10])
+          ctx.setLineDash([dash, dash])
         } else if (obj.style.strokeStyle === "dotted") {
-          ctx.setLineDash([5, 5])
+          ctx.setLineDash([2, dash])
         }
 
         ctx.stroke()
         ctx.setLineDash([])
+      } else if (obj.type === "circle" && obj.vertices.length === 2) {
+        const radius = getDistance(obj.vertices[0], obj.vertices[1])
+        ctx.beginPath()
+        ctx.arc(obj.vertices[0].x, obj.vertices[0].y, radius, 0, Math.PI * 2)
+        ctx.fillStyle = obj.style.fillColor + Math.round(obj.style.fillOpacity * 255).toString(16).padStart(2, "0")
+        ctx.fill()
+
+        if (obj.style.strokeStyle !== "none") {
+          ctx.strokeStyle = isSelected ? "#3C00BB" : obj.style.strokeColor
+          ctx.lineWidth = isSelected ? obj.style.strokeWidth + 2 : obj.style.strokeWidth
+          const dash = obj.style.dashSpacing || 10
+          if (obj.style.strokeStyle === "dashed") {
+            ctx.setLineDash([dash, dash])
+          } else if (obj.style.strokeStyle === "dotted") {
+            ctx.setLineDash([2, dash])
+          }
+          ctx.stroke()
+          ctx.setLineDash([])
+        }
+      } else if (obj.type === "square" && obj.vertices.length === 2) {
+        const w = obj.vertices[1].x - obj.vertices[0].x
+        const h = obj.vertices[1].y - obj.vertices[0].y
+        ctx.beginPath()
+        ctx.rect(obj.vertices[0].x, obj.vertices[0].y, w, h)
+        ctx.fillStyle = obj.style.fillColor + Math.round(obj.style.fillOpacity * 255).toString(16).padStart(2, "0")
+        ctx.fill()
+
+        if (obj.style.hatchPattern !== "none") {
+          const squareVertices = [
+            obj.vertices[0],
+            { x: obj.vertices[0].x + w, y: obj.vertices[0].y },
+            obj.vertices[1],
+            { x: obj.vertices[0].x, y: obj.vertices[1].y }
+          ]
+          drawHatchPattern(ctx, squareVertices, obj.style.hatchPattern, obj.style.strokeColor, hatchSpacing, hatchLineWidth)
+        }
+
+        if (obj.style.strokeStyle !== "none") {
+          ctx.strokeStyle = isSelected ? "#3C00BB" : obj.style.strokeColor
+          ctx.lineWidth = isSelected ? obj.style.strokeWidth + 2 : obj.style.strokeWidth
+          const dash = obj.style.dashSpacing || 10
+          if (obj.style.strokeStyle === "dashed") {
+            ctx.setLineDash([dash, dash])
+          } else if (obj.style.strokeStyle === "dotted") {
+            ctx.setLineDash([2, dash])
+          }
+          ctx.stroke()
+          ctx.setLineDash([])
+        }
+      } else if (obj.type === "triangle" && obj.vertices.length === 2) {
+        const x1 = obj.vertices[0].x
+        const y1 = obj.vertices[0].y
+        const x2 = obj.vertices[1].x
+        const y2 = obj.vertices[1].y
+        const minX = Math.min(x1, x2)
+        const maxX = Math.max(x1, x2)
+        const minY = Math.min(y1, y2)
+        const maxY = Math.max(y1, y2)
+        const w = maxX - minX
+        const h = maxY - minY
+
+        ctx.beginPath()
+        ctx.moveTo(minX + w / 2, minY)
+        ctx.lineTo(maxX, maxY)
+        ctx.lineTo(minX, maxY)
+        ctx.closePath()
+
+        ctx.fillStyle = obj.style.fillColor + Math.round(obj.style.fillOpacity * 255).toString(16).padStart(2, "0")
+        ctx.fill()
+
+        if (obj.style.hatchPattern !== "none") {
+          const triangleVertices = [
+            { x: minX + w / 2, y: minY },
+            { x: maxX, y: maxY },
+            { x: minX, y: maxY }
+          ]
+          drawHatchPattern(ctx, triangleVertices, obj.style.hatchPattern, obj.style.strokeColor, hatchSpacing, hatchLineWidth)
+        }
+
+        if (obj.style.strokeStyle !== "none") {
+          ctx.strokeStyle = isSelected ? "#3C00BB" : obj.style.strokeColor
+          ctx.lineWidth = isSelected ? obj.style.strokeWidth + 2 : obj.style.strokeWidth
+          const dash = obj.style.dashSpacing || 10
+          if (obj.style.strokeStyle === "dashed") {
+            ctx.setLineDash([dash, dash])
+          } else if (obj.style.strokeStyle === "dotted") {
+            ctx.setLineDash([2, dash])
+          }
+          ctx.stroke()
+          ctx.setLineDash([])
+        }
       }
 
       ctx.restore()
@@ -387,12 +571,12 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       ctx.lineTo(project.calibrationPoints.end.x, project.calibrationPoints.end.y)
       ctx.stroke()
       ctx.setLineDash([])
-      ;[project.calibrationPoints.start, project.calibrationPoints.end].forEach((p) => {
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, 6, 0, Math.PI * 2)
-        ctx.fillStyle = "#ffcc00"
-        ctx.fill()
-      })
+        ;[project.calibrationPoints.start, project.calibrationPoints.end].forEach((p) => {
+          ctx.beginPath()
+          ctx.arc(p.x, p.y, 6, 0, Math.PI * 2)
+          ctx.fillStyle = "#ffcc00"
+          ctx.fill()
+        })
       ctx.restore()
     }
 
@@ -443,15 +627,50 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
           ctx.fillStyle = toolMode === "calibrate" ? "#ffcc00" : "#3C00BB"
           ctx.fill()
         })
+      } else if (["circle", "square", "triangle"].includes(toolMode) && drawingVertices.length >= 1) {
+        const start = drawingVertices[0]
+        const end = drawingVertices.length > 1 ? drawingVertices[1] : start
+
+        ctx.strokeStyle = "#3C00BB"
+        ctx.lineWidth = 2
+
+        if (toolMode === "circle") {
+          const radius = getDistance(start, end)
+          ctx.beginPath()
+          ctx.arc(start.x, start.y, radius, 0, Math.PI * 2)
+          ctx.stroke()
+        } else if (toolMode === "square") {
+          const w = end.x - start.x
+          const h = end.y - start.y
+          ctx.strokeRect(start.x, start.y, w, h)
+        } else if (toolMode === "triangle") {
+          const x1 = start.x
+          const y1 = start.y
+          const x2 = end.x
+          const y2 = end.y
+          const minX = Math.min(x1, x2)
+          const maxX = Math.max(x1, x2)
+          const minY = Math.min(y1, y2)
+          const maxY = Math.max(y1, y2)
+          const w = maxX - minX
+          const h = maxY - minY
+
+          ctx.beginPath()
+          ctx.moveTo(minX + w / 2, minY)
+          ctx.lineTo(maxX, maxY)
+          ctx.lineTo(minX, maxY)
+          ctx.closePath()
+          ctx.stroke()
+        }
       }
 
       ctx.restore()
     }
   }, [
-    baseMapImage,
     project,
     objects,
     selectedObjectId,
+    selectedImageId,
     drawingVertices,
     toolMode,
     displaySettings,
@@ -459,6 +678,7 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
     drawGrid,
     drawArrowhead,
     editingVertexIndex,
+    loadedImages
   ])
 
   useEffect(() => {
@@ -523,41 +743,79 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       }
 
       if (toolMode === "select" || sequenceMode) {
-        for (const obj of objects) {
-          if (obj.type === "polygon" && isPointInPolygon(coords, obj.vertices)) {
+        // Check objects (reverse order for z-index)
+        for (let i = objects.length - 1; i >= 0; i--) {
+          const obj = objects[i]
+          if (hitTestObject(coords, obj)) {
             if (sequenceMode) {
               onSequenceAdd(obj.id)
             } else {
               onSelectObject(obj.id)
             }
             return
-          } else if (obj.type === "threshold" && obj.vertices.length === 2) {
-            if (isPointNearLine(coords, obj.vertices[0], obj.vertices[1], 15)) {
-              if (sequenceMode) {
-                onSequenceAdd(obj.id)
-              } else {
-                onSelectObject(obj.id)
-              }
-              return
-            }
-          } else if (obj.type === "freehand" && obj.vertices.length > 1) {
-            if (isPointNearPath(coords, obj.vertices, 15)) {
-              if (sequenceMode) {
-                onSequenceAdd(obj.id)
-              } else {
-                onSelectObject(obj.id)
+          }
+
+        }
+
+        // 2. Check images (if no object hit, and not in sequence mode)
+        if (!sequenceMode && project?.images && onSelectImage) {
+          const sortedImages = [...project.images].sort((a, b) => b.zIndex - a.zIndex)
+          for (const imgData of sortedImages) {
+            if (!imgData.visible) continue
+
+            const img = loadedImages[imgData.id]
+            if (!img) continue
+
+            const w = img.width * imgData.scale
+            const h = img.height * imgData.scale
+
+            // TODO: Handle rotation hit testing
+            if (coords.x >= imgData.position.x && coords.x <= imgData.position.x + w &&
+              coords.y >= imgData.position.y && coords.y <= imgData.position.y + h) {
+              onSelectImage(imgData.id)
+              onSelectObject(null)
+
+              if (!imgData.locked) {
+                setDraggingImageId(imgData.id)
+                dragStartRef.current = coords
+                initialImagePosRef.current = imgData.position
               }
               return
             }
           }
+          // If clicked on nothing
+          onSelectImage(null)
         }
+
+        onSelectObject(null)
         onSelectObject(null)
       } else if (toolMode === "polygon") {
         setDrawingVertices((prev) => [...prev, coords])
         setIsDrawing(true)
-      } else if (toolMode === "freehand") {
+      } else if (toolMode === "freehand" || toolMode === "highlighter") {
         setDrawingVertices([coords])
         setIsDrawing(true)
+      } else if (["circle", "square", "triangle"].includes(toolMode)) {
+        setDrawingVertices([coords])
+        setIsDrawing(true)
+      } else if (toolMode === "eraser") {
+        for (let i = objects.length - 1; i >= 0; i--) {
+          const obj = objects[i]
+          if (hitTestObject(coords, obj)) {
+            onDeleteObject?.(obj.id)
+            return
+          }
+        }
+      } else if (toolMode === "match") {
+        for (let i = objects.length - 1; i >= 0; i--) {
+          const obj = objects[i]
+          if (hitTestObject(coords, obj)) {
+            onMatchStyle?.(obj.style)
+            return
+          }
+        }
+        // ... other types
+
       } else if (toolMode === "threshold" || toolMode === "calibrate") {
         if (drawingVertices.length === 0) {
           setDrawingVertices([coords])
@@ -590,12 +848,25 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       onSequenceAdd,
       onThresholdComplete,
       onCalibrationComplete,
+      project?.images,
+      loadedImages,
+      onSelectImage
     ],
   )
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const coords = getCanvasCoords(e)
+
+      if (draggingImageId && dragStartRef.current && initialImagePosRef.current) {
+        const dx = coords.x - dragStartRef.current.x
+        const dy = coords.y - dragStartRef.current.y
+        setTransientImagePosition({
+          x: initialImagePosRef.current.x + dx,
+          y: initialImagePosRef.current.y + dy,
+        })
+        return
+      }
 
       if (isDraggingVertex && editingVertexIndex !== null && selectedObjectId) {
         const selectedObj = objects.find((o) => o.id === selectedObjectId)
@@ -608,13 +879,19 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
         return
       }
 
-      if (!isDrawing || toolMode !== "freehand") return
+      if (!isDrawing) return
 
-      const lastPoint = drawingVertices[drawingVertices.length - 1]
-      const minDistance = displaySettings.freehandSmoothing || 3
+      if (toolMode === "freehand" || toolMode === "highlighter") {
+        const lastPoint = drawingVertices[drawingVertices.length - 1]
+        const minDistance = displaySettings.freehandSmoothing || 3
 
-      if (lastPoint && getDistance(lastPoint, coords) > minDistance) {
-        setDrawingVertices((prev) => [...prev, coords])
+        if (lastPoint && getDistance(lastPoint, coords) > minDistance) {
+          setDrawingVertices((prev) => [...prev, coords])
+        }
+      } else if (["circle", "square", "triangle"].includes(toolMode)) {
+        if (drawingVertices.length > 0) {
+          setDrawingVertices([drawingVertices[0], coords])
+        }
       }
     },
     [
@@ -633,18 +910,32 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
   )
 
   const handlePointerUp = useCallback(() => {
+
+    if (draggingImageId && transientImagePosition && onUpdateImage) {
+      onUpdateImage(draggingImageId, { position: transientImagePosition })
+      setDraggingImageId(null)
+      setTransientImagePosition(null)
+      dragStartRef.current = null
+      initialImagePosRef.current = null
+      return
+    }
+
     if (isDraggingVertex) {
       setIsDraggingVertex(false)
       setEditingVertexIndex(null)
       return
     }
 
-    if (toolMode === "freehand" && isDrawing && drawingVertices.length > 5) {
+    if ((toolMode === "freehand" || toolMode === "highlighter") && isDrawing && drawingVertices.length > 5) {
       onFreehandComplete(drawingVertices)
       setDrawingVertices([])
       setIsDrawing(false)
+    } else if (["circle", "square", "triangle"].includes(toolMode) && isDrawing && drawingVertices.length === 2) {
+      onShapeComplete?.(toolMode as "circle" | "square" | "triangle", drawingVertices)
+      setDrawingVertices([])
+      setIsDrawing(false)
     }
-  }, [toolMode, isDrawing, drawingVertices, onFreehandComplete, isDraggingVertex])
+  }, [toolMode, isDrawing, drawingVertices, onFreehandComplete, isDraggingVertex, draggingImageId, transientImagePosition, onUpdateImage, onShapeComplete])
 
   const finishPolygon = useCallback(() => {
     if (drawingVertices.length >= 3) {
@@ -700,16 +991,51 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
   const handleReset = useCallback(() => {
     transformRef.current?.resetTransform(200)
   }, [])
-
   const handleFit = useCallback(() => {
-    if (containerRef.current && baseMapImage) {
+    if (containerRef.current && project?.images && project.images.length > 0) {
       const container = containerRef.current.getBoundingClientRect()
-      const scaleX = container.width / (baseMapImage.width * (project?.baseMapScale || 1))
-      const scaleY = container.height / (baseMapImage.height * (project?.baseMapScale || 1))
+
+      // Calculate bounding box of all visible images
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      let hasVisibleImages = false
+
+      project.images.forEach(imgData => {
+        if (!imgData.visible) return
+        const img = loadedImages[imgData.id]
+        if (!img) return
+
+        hasVisibleImages = true
+        minX = Math.min(minX, imgData.position.x)
+        minY = Math.min(minY, imgData.position.y)
+        maxX = Math.max(maxX, imgData.position.x + img.width * imgData.scale)
+        maxY = Math.max(maxY, imgData.position.y + img.height * imgData.scale)
+      })
+
+      if (!hasVisibleImages) return
+
+      const contentWidth = maxX - minX
+      const contentHeight = maxY - minY
+
+      const scaleX = container.width / contentWidth
+      const scaleY = container.height / contentHeight
       const scale = Math.min(scaleX, scaleY, 1) * 0.9
-      transformRef.current?.setTransform(0, 0, scale, 200)
+
+      // Center the content
+      const midX = (minX + maxX) / 2
+      const midY = (minY + maxY) / 2
+
+      // Calculate position to center the content
+      // transform center is viewport center.
+      // We want midX, midY to be at center.
+      // x = -midX * scale + viewportWidth/2
+      // y = -midY * scale + viewportHeight/2
+
+      const targetX = -midX * scale + container.width / 2
+      const targetY = -midY * scale + container.height / 2
+
+      transformRef.current?.setTransform(targetX, targetY, scale, 200)
     }
-  }, [baseMapImage, project?.baseMapScale])
+  }, [project?.images, loadedImages])
 
   return (
     <div ref={containerRef} className="absolute inset-0 top-14 overflow-hidden sm:top-16">
@@ -758,9 +1084,8 @@ export const MapCanvas = forwardRef<MapCanvasRef, MapCanvasProps>(function MapCa
       <ZoomPreview
         canvasSize={canvasSize}
         viewportRect={viewportRect}
-        baseMapImage={baseMapImage}
-        baseMapPosition={project?.baseMapPosition}
-        baseMapScale={project?.baseMapScale}
+        loadedImages={loadedImages}
+        images={project?.images || []}
         objects={objects}
         onPreviewClick={handlePreviewClick}
         className="hidden sm:block"

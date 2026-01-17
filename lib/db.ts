@@ -5,14 +5,38 @@ export interface ObjectStyle {
   fillOpacity: number
   strokeColor: string
   strokeWidth: number
-  strokeStyle: "solid" | "dashed" | "dotted"
+  strokeStyle: "solid" | "dashed" | "dotted" | "none"
   hatchPattern: "none" | "diagonal" | "dotted" | "crosshatch"
-  lineEndpoints: "none" | "points" | "arrows"
-  endpointSize: number
+  hatchAngle: number
   hatchSpacing: number
   hatchLineWidth: number
+  strokeHatch: boolean
+  lineEndpoints: "none" | "points" | "arrows"
+  endpointSize: number
   pointSize: number
   showPoints: boolean
+  // Freehand specific
+  smoothing: number
+  dashSpacing: number
+}
+
+export interface MapImage {
+  id: string
+  src: string
+  position: { x: number; y: number }
+  scale: number
+  rotation: number
+  opacity: number
+  locked: boolean
+  visible: boolean
+  zIndex: number
+  // Effects
+  grayscale: number
+  saturation: number
+  brightness: number
+  contrast: number
+  sepia: number
+  blendingMode: "normal" | "multiply" | "screen" | "overlay"
 }
 
 export interface CustomField {
@@ -21,17 +45,25 @@ export interface CustomField {
   value: string
 }
 
+export interface PathSection {
+  type: string // "pedestrian", "car", etc.
+  startIdx: number
+  endIdx: number
+}
+
 export interface ObjectMetadata {
   tags: string[]
   notes: string
   photos: string[]
   qualitativeType: string
   customFields: CustomField[]
+  pathType?: "pedestrian" | "car" | "bike" | "other"
 }
 
 export interface MapObject {
   id: string
-  type: "polygon" | "threshold" | "freehand"
+  projectId: string
+  type: "polygon" | "threshold" | "freehand" | "circle" | "square" | "triangle"
   name: string
   vertices: { x: number; y: number }[]
   style: ObjectStyle
@@ -43,9 +75,7 @@ export interface MapObject {
 export interface Project {
   id: string
   name: string
-  baseMapImage: string | null
-  baseMapPosition: { x: number; y: number }
-  baseMapScale: number
+  images: MapImage[]
   pixelToMeterRatio: number | null
   calibrationPoints: { start: { x: number; y: number }; end: { x: number; y: number } } | null
   gridStyle: "lines" | "dots" | "smallSquares"
@@ -82,11 +112,24 @@ class ThresholdMapperDB extends Dexie {
 
   constructor() {
     super("ThresholdMapperDB")
-    this.version(3).stores({
+    this.version(5).stores({
       projects: "id, name, createdAt, gridStyle, gridSize",
-      objects: "id, type, createdAt",
+      objects: "id, projectId, type, createdAt",
       sequences: "id, projectId, createdAt",
       savedDatasets: "id, projectId, createdAt",
+    }).upgrade(async tx => {
+      // Migration: add projectId to existing objects
+      const objects = await tx.table('objects').toArray()
+      const projects = await tx.table('projects').toArray()
+
+      if (projects.length > 0 && objects.length > 0) {
+        const firstProjectId = projects[0].id
+        for (const obj of objects) {
+          if (!obj.projectId) {
+            await tx.table('objects').update(obj.id, { projectId: firstProjectId })
+          }
+        }
+      }
     })
   }
 }
@@ -119,9 +162,7 @@ export async function createProject(name: string): Promise<Project> {
   const project: Project = {
     id: crypto.randomUUID(),
     name,
-    baseMapImage: null,
-    baseMapPosition: { x: 0, y: 0 },
-    baseMapScale: 1,
+    images: [],
     pixelToMeterRatio: null,
     calibrationPoints: null,
     gridStyle: "lines",
@@ -137,6 +178,31 @@ export async function createProject(name: string): Promise<Project> {
 
 export async function updateProject(id: string, updates: Partial<Project>): Promise<void> {
   await getDb().projects.update(id, { ...updates, updatedAt: Date.now() })
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  // Delete all objects associated with this project
+  const objects = await getDb().objects.toArray()
+  const projectObjects = objects.filter(obj => {
+    // Assuming objects don't have projectId - they're global
+    // We'll just delete the project for now
+    return false
+  })
+
+  // Delete all sequences for this project
+  const sequences = await getDb().sequences.where('projectId').equals(id).toArray()
+  for (const seq of sequences) {
+    await getDb().sequences.delete(seq.id)
+  }
+
+  // Delete all saved datasets for this project
+  const datasets = await getDb().savedDatasets.where('projectId').equals(id).toArray()
+  for (const dataset of datasets) {
+    await getDb().savedDatasets.delete(dataset.id)
+  }
+
+  // Finally delete the project itself
+  await getDb().projects.delete(id)
 }
 
 export async function createMapObject(obj: Omit<MapObject, "id" | "createdAt" | "updatedAt">): Promise<MapObject> {

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Search, ImageIcon } from "lucide-react"
 import type { MapObject } from "@/lib/db"
-import { getPolygonArea, getLineLength } from "@/lib/canvas-utils"
+import { getPolygonArea, getLineLength, getPolylineLength } from "@/lib/canvas-utils"
 import { formatMeasurement, type MeasurementUnit } from "@/lib/measurement-utils"
 
 interface DataTableViewProps {
@@ -40,7 +40,7 @@ export function DataTableView({
   const allCustomFieldNames = useMemo(() => {
     const names = new Set<string>()
     objects.forEach((obj) => {
-      ;(obj.metadata.customFields || []).forEach((field) => {
+      ; (obj.metadata.customFields || []).forEach((field) => {
         names.add(field.name)
       })
     })
@@ -55,7 +55,8 @@ export function DataTableView({
       const length = getLineLength(obj.vertices[0], obj.vertices[1], pixelToMeterRatio)
       return pixelToMeterRatio ? formatMeasurement(length, measurementUnit, false) : "N/A"
     } else if (obj.type === "freehand") {
-      return `${obj.vertices.length} points`
+      const length = getPolylineLength(obj.vertices, pixelToMeterRatio)
+      return pixelToMeterRatio ? formatMeasurement(length, measurementUnit, false) : "N/A"
     }
     return "N/A"
   }

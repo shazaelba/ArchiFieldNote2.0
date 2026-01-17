@@ -1,4 +1,39 @@
 // Utility functions for canvas operations
+import type { MapObject } from "@/lib/db"
+
+export function hitTestObject(point: { x: number; y: number }, obj: MapObject, threshold = 15): boolean {
+  if (obj.type === "polygon") {
+    return isPointInPolygon(point, obj.vertices)
+  } else if (obj.type === "threshold" && obj.vertices.length === 2) {
+    return isPointNearLine(point, obj.vertices[0], obj.vertices[1], threshold)
+  } else if (obj.type === "freehand" && obj.vertices.length > 1) {
+    return isPointNearPath(point, obj.vertices, threshold)
+  } else if (obj.type === "circle" && obj.vertices.length === 2) {
+    const radius = getDistance(obj.vertices[0], obj.vertices[1])
+    return getDistance(point, obj.vertices[0]) <= radius
+  } else if (obj.type === "square" && obj.vertices.length === 2) {
+    const minX = Math.min(obj.vertices[0].x, obj.vertices[1].x)
+    const maxX = Math.max(obj.vertices[0].x, obj.vertices[1].x)
+    const minY = Math.min(obj.vertices[0].y, obj.vertices[1].y)
+    const maxY = Math.max(obj.vertices[0].y, obj.vertices[1].y)
+    return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
+  } else if (obj.type === "triangle" && obj.vertices.length === 2) {
+    const x1 = obj.vertices[0].x
+    const y1 = obj.vertices[0].y
+    const x2 = obj.vertices[1].x
+    const y2 = obj.vertices[1].y
+    const minX = Math.min(x1, x2)
+    const maxX = Math.max(x1, x2)
+    const minY = Math.min(y1, y2)
+    const maxY = Math.max(y1, y2)
+    const w = maxX - minX
+    const t1 = { x: minX + w / 2, y: minY }
+    const t2 = { x: maxX, y: maxY }
+    const t3 = { x: minX, y: maxY }
+    return isPointInPolygon(point, [t1, t2, t3])
+  }
+  return false
+}
 
 export function getDistance(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
   return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2))
@@ -152,4 +187,17 @@ export function isPointNearPath(
     }
   }
   return false
+}
+
+export function getPolylineLength(
+  vertices: { x: number; y: number }[],
+  pixelToMeterRatio: number | null,
+): number {
+  if (vertices.length < 2) return 0
+  let totalDist = 0
+  for (let i = 0; i < vertices.length - 1; i++) {
+    totalDist += getDistance(vertices[i], vertices[i + 1])
+  }
+  if (!pixelToMeterRatio) return totalDist
+  return totalDist / pixelToMeterRatio
 }
